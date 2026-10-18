@@ -233,7 +233,8 @@ export class RoadView {
       ctx.fillRect(len * 0.07, -wid * 0.33, len * 0.2, wid * 0.66);
       ctx.fillStyle = "#213f3d88";
       ctx.fillRect(-len * 0.28, -wid * 0.3, len * 0.15, wid * 0.6);
-      const braking = car.a < -0.5 || car.broken || sim.time < car.brakeUntil;
+      const braking =
+        car.a < -0.5 || car.safety || car.broken || sim.time < car.brakeUntil;
       ctx.fillStyle = braking ? "#ff6464" : "#c56d64";
       ctx.fillRect(-len / 2, -wid * 0.39, 1.5, wid * 0.24);
       ctx.fillRect(-len / 2, wid * 0.15, 1.5, wid * 0.24);

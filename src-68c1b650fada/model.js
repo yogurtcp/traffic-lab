@@ -49,7 +49,7 @@ export const PERSONALITIES = {
     accel: 3.6,
     brake: 5,
     description:
-      "160 km/h maximum. Weaves through available gaps and passes on either side.",
+      "160 km/h maximum. Squeezes into small gaps on either side, making other drivers brake.",
   },
   cautious: {
     name: "Cautious",
@@ -179,6 +179,7 @@ export class Simulation {
     this.safetyInterventions = 0;
     this.events = [];
     this.history = [];
+    this.queueCache = new WeakMap();
     this.samples = [];
     this.nextObstacle = 1;
     const random = rng(this.config.seed);
@@ -277,6 +278,43 @@ export class Simulation {
     }
     return { front, rear, gap, backGap };
   }
+  obstructionQueues(state = this) {
+    // Snapshots are immutable. Live positions are only read once per step,
+    // after new lane reservations have been made.
+    if (state !== this && this.queueCache.has(state))
+      return this.queueCache.get(state);
+    const queues = Array.from({ length: this.config.lanes }, () => new Set());
+    for (let lane = 0; lane < this.config.lanes; lane++) {
+      const entries = [...state.cars, ...state.obstacles]
+        .filter((c) => this.occupied(c, lane))
+        .sort((a, b) => a.q - b.q);
+      for (let i = 0; i < entries.length; i++) {
+        if (!entries[i].obstacle && !entries[i].broken) continue;
+        let leader = entries[i];
+        for (let offset = 1; offset < entries.length; offset++) {
+          const car = entries[mod(i - offset, entries.length)];
+          if (car.obstacle || car.broken || queues[lane].has(car.id)) break;
+          const gap =
+            this.forward(car.q, leader.q, lane) -
+            (CAR_LENGTH + (leader.length ?? CAR_LENGTH)) / 2;
+          if (gap > Math.max(55, car.v * 3.5)) break;
+          // Follow the connected slow queue, not unrelated traffic elsewhere
+          // around the ring. The first car directly facing the hazard may
+          // still be travelling quickly when it needs to get out of the way.
+          if (
+            !leader.obstacle &&
+            !leader.broken &&
+            (car.v * 3.6 > 70.5 || leader.v * 3.6 > 70.5)
+          )
+            break;
+          queues[lane].add(car.id);
+          leader = car;
+        }
+      }
+    }
+    if (state !== this) this.queueCache.set(state, queues);
+    return queues;
+  }
   acceleration(car, lane, state) {
     const p = PERSONALITIES[car.type];
     const { front, gap } = this.neighbors(car, lane, state);
@@ -295,6 +333,7 @@ export class Simulation {
     // Right-hand traffic: inner lane is left. Law-abiding drivers cannot
     // advance past a slower car immediately to their left, even without merging.
     if (car.type !== "stuntman" && lane > 0) {
+      const queues = this.obstructionQueues(state);
       for (let leftLane = 0; leftLane < lane; leftLane++) {
         const left = this.neighbors(car, leftLane, state);
         const scale = this.laneLength(lane) / this.laneLength(leftLane);
@@ -304,6 +343,7 @@ export class Simulation {
           left.front &&
           !left.front.obstacle &&
           !left.front.broken &&
+          !queues[leftLane].has(left.front.id) &&
           leftGap < Math.max(14, car.v * 1.8) &&
           leftSpeed < car.v
         ) {
@@ -328,8 +368,23 @@ export class Simulation {
     if (lane < 0 || lane >= this.config.lanes) return false;
     const { front, rear, gap, backGap } = this.neighbors(car, lane);
     const p = PERSONALITIES[car.type];
-    const multiplier =
-      car.type === "stuntman" ? 0.45 : car.type === "cautious" ? 1.3 : 0.85;
+    if (car.type === "stuntman") {
+      // Risky cut-ins deliberately ignore the following driver's comfortable
+      // headway. Physical clearance and the collision guard still apply.
+      return (
+        gap >
+          Math.max(
+            1.5,
+            car.v * 0.1 + Math.max(0, car.v - (front?.v ?? car.v)) * 0.3,
+          ) &&
+        backGap >
+          Math.max(
+            1.2,
+            (rear?.v ?? 0) * 0.04 + Math.max(0, (rear?.v ?? 0) - car.v) * 0.1,
+          )
+      );
+    }
+    const multiplier = car.type === "cautious" ? 1.3 : 0.85;
     return (
       gap >
         Math.max(
@@ -356,7 +411,11 @@ export class Simulation {
     const desiredSpeed = PERSONALITIES[car.type].speed / 3.6;
     const passMargin = 2 / 3.6;
     const lookAhead = Math.max(55, old.v * 3.5);
-    const obstruction = front && (front.obstacle || front.broken);
+    const obstruction =
+      front &&
+      (front.obstacle ||
+        front.broken ||
+        this.obstructionQueues(delayed)[car.lane].has(car.id));
     // Being near a car doing 70 does not itself justify passing: the driver
     // must be held below their own desired speed, and not be falling behind.
     const blocked =
@@ -369,17 +428,35 @@ export class Simulation {
     let choices = [];
     if (car.type === "hog") {
       if (car.lane > 0) choices = [car.lane - 1];
-      else if ((front?.obstacle || front?.broken) && blocked)
-        choices = [car.lane + 1];
+      else if (obstruction && blocked) choices = [car.lane + 1];
     } else if (car.type === "stuntman") {
       const current = this.acceleration(old, car.lane, delayed);
       choices = [car.lane - 1, car.lane + 1]
         .filter((l) => l >= 0 && l < this.config.lanes)
-        .map((l) => ({
-          l,
-          score: this.acceleration(old, l, delayed) - current,
-        }))
-        .filter((x) => x.score > 0.35)
+        .map((l) => {
+          const next = this.neighbors(old, l, delayed);
+          // Both acceleration estimates can saturate at hard braking in tight
+          // traffic. Still try a better gap or faster leader in that case.
+          const roomGain = clamp(
+            (Math.min(next.gap, 120) - Math.min(gap, 120)) / 10,
+            -3,
+            3,
+          );
+          const paceGain = clamp(
+            ((next.front?.v ?? desiredSpeed) - (front?.v ?? desiredSpeed)) / 5,
+            -2,
+            2,
+          );
+          return {
+            l,
+            score:
+              this.acceleration(old, l, delayed) -
+              current +
+              roomGain * 0.5 +
+              paceGain,
+          };
+        })
+        .filter((x) => x.score > 0.2)
         .sort((a, b) => b.score - a.score)
         .map((x) => x.l);
     } else {
@@ -396,8 +473,7 @@ export class Simulation {
       }
       // Moving right to escape a stationary obstacle is permitted. Passing
       // moving traffic on the right is not; acceleration also enforces that.
-      if ((front?.obstacle || front?.broken) && blocked)
-        choices.push(car.lane + 1);
+      if (obstruction && blocked) choices.push(car.lane + 1);
       if (!blocked && car.lane < this.config.lanes - 1) {
         const right = this.neighbors(old, car.lane + 1, delayed);
         if (right.gap > Math.max(65, car.v * 4)) choices.push(car.lane + 1);
@@ -408,7 +484,7 @@ export class Simulation {
         car.from = car.lane;
         car.target = lane;
         car.blend = 0;
-        car.cooldown = car.type === "stuntman" ? 2.4 : 5;
+        car.cooldown = car.type === "stuntman" ? 1.8 : 5;
         this.changes++;
         break;
       }
@@ -428,6 +504,7 @@ export class Simulation {
       c.cooldown -= dt;
       this.considerLane(c, delayed);
     }
+    const liveQueues = this.obstructionQueues();
     const moves = new Map();
     for (const car of this.cars) {
       const old = delayed.cars.find((c) => c.id === car.id) ?? car;
@@ -471,6 +548,7 @@ export class Simulation {
               !front ||
               front.obstacle ||
               front.broken ||
+              liveQueues[leftLane].has(front.id) ||
               front.v / this.laneLength(leftLane) >
                 car.v / this.laneLength(car.lane) ||
               gap > Math.max(14, car.v * 1.8)
