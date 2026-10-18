@@ -1,3 +1,6 @@
+import { getRoute } from "./route.js";
+import { Junction } from "./junction.js";
+
 export const STEP = 0.05;
 export const CAR_LENGTH = 4.5;
 export const LANE_WIDTH = 3.7;
@@ -126,6 +129,16 @@ export const PRESETS = {
     seed: 42,
     counts: { regular: 25, slowpoke: 5, hog: 5, speedster: 12, stuntman: 3 },
   },
+  junction: {
+    name: "Junction lab",
+    layout: "figure8",
+    intersection: "stop",
+    lanes: 1,
+    length: 1000,
+    reaction: 0.9,
+    seed: 42,
+    counts: { regular: 8 },
+  },
 };
 export const mod = (v, n = 1) => ((v % n) + n) % n;
 export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -144,6 +157,12 @@ export function normalizeConfig(input = {}) {
     remaining -= counts[key];
   }
   return {
+    layout: ["circle", "rectangle", "figure8"].includes(input.layout)
+      ? input.layout
+      : "circle",
+    intersection: ["stop", "lights", "roundabout"].includes(input.intersection)
+      ? input.intersection
+      : "stop",
     lanes: Math.round(numeric(input.lanes, 3, 1, 5)),
     length: Math.round(numeric(input.length, 1000, 600, 2000)),
     reaction: numeric(input.reaction, 0.9, 0, 2),
@@ -165,13 +184,18 @@ export class Simulation {
     this.reset(config);
   }
   laneLength(lane) {
-    return this.config.length + 2 * Math.PI * LANE_WIDTH * lane;
+    return (
+      this.config.length +
+      (this.config.layout === "figure8" ? -6 : 2) * Math.PI * LANE_WIDTH * lane
+    );
   }
   occupied(car, lane) {
     return car.lane === lane || car.target === lane;
   }
   reset(config) {
     this.config = normalizeConfig(config);
+    this.route = getRoute(this.config.layout, this.config.intersection);
+    this.junction = new Junction(this.route, this.config);
     this.time = 0;
     this.obstacles = [];
     this.changes = 0;
@@ -222,10 +246,29 @@ export class Simulation {
         brakeUntil: 0,
         broken: false,
         laps: 0,
+        travelled: 0,
         distance: 0,
         safety: false,
       })),
     );
+    if (this.route.entries.length) {
+      for (const car of this.cars) {
+        car.q = this.route.spawn(car.q, 7 / this.laneLength(car.lane));
+        car.v = 0;
+      }
+      if (
+        buckets.some((cars, lane) => {
+          const length = this.laneLength(lane);
+          const available = this.route
+            .usableIntervals(7 / length)
+            .reduce((s, [a, b]) => s + b - a, 0);
+          return cars.length * (CAR_LENGTH + 0.7) > length * available;
+        })
+      )
+        throw new Error(
+          "Too many cars for the open road around this junction. Add lanes, lengthen the road, or reduce cars.",
+        );
+    }
     // Congested starts must still fit physically, even if a chosen mix is extreme.
     this.cars = this.cars.filter(
       (c) =>
@@ -352,6 +395,7 @@ export class Simulation {
           !left.front.obstacle &&
           !left.front.broken &&
           !queues[leftLane].has(left.front.id) &&
+          !this.junction.inApproachQueue(left.front, this) &&
           leftGap < Math.max(14, car.v * 1.8) &&
           leftSpeed < car.v
         ) {
@@ -429,6 +473,7 @@ export class Simulation {
       car.target !== null ||
       car.cooldown > 0 ||
       car.broken ||
+      !this.junction.canChangeLane(car, this) ||
       this.time < car.brakeUntil
     )
       return;
@@ -519,6 +564,7 @@ export class Simulation {
   step(dt = STEP) {
     if (Math.abs(dt - STEP) > 1e-8)
       throw new Error("Use the fixed 0.05-second simulation step.");
+    this.junction.update(this);
     const delayed =
       this.history[
         Math.max(
@@ -537,6 +583,19 @@ export class Simulation {
       let a = this.acceleration(old, car.lane, delayed);
       if (car.target !== null)
         a = Math.min(a, this.acceleration(old, car.target, delayed));
+      const gate = this.junction.gate(car, this);
+      if (gate)
+        a = Math.min(a, this.followingAcceleration(old, { v: 0 }, gate.gap));
+      const junctionLimit = this.junction.speedLimit(car, this);
+      if (Number.isFinite(junctionLimit))
+        a = Math.min(
+          a,
+          clamp(
+            PERSONALITIES[car.type].accel * (1 - (car.v / junctionLimit) ** 4),
+            -6,
+            PERSONALITIES[car.type].accel,
+          ),
+        );
       if (car.broken || this.time < car.brakeUntil) a = -6;
       if (car.broken && car.v < 0.1) a = 0;
       if (a < -3 && car.a >= -3) this.hardBrakes++;
@@ -556,6 +615,15 @@ export class Simulation {
         advance: (((car.v + nextV) / 2) * dt) / length,
         v: nextV,
       });
+      if (gate) {
+        const move = moves.get(car.id),
+          maximum = gate.gap / length;
+        if (move.advance > maximum) {
+          move.advance = maximum;
+          move.v = Math.min(move.v, (maximum * length) / dt);
+          car.safety = true;
+        }
+      }
     }
     // A final non-physical guard prevents interpenetration at extreme delays.
     // Iterate through the queue so a hard stop propagates safely in this step.
@@ -575,6 +643,7 @@ export class Simulation {
               front.obstacle ||
               front.broken ||
               liveQueues[leftLane].has(front.id) ||
+              this.junction.inApproachQueue(front, this) ||
               front.v / this.laneLength(leftLane) >
                 car.v / this.laneLength(car.lane) ||
               gap > Math.max(14, car.v * 1.8)
@@ -619,10 +688,10 @@ export class Simulation {
       const move = moves.get(car.id);
       if (car.safety) this.safetyInterventions++;
       car.distance += move.advance * this.laneLength(car.lane);
-      if (car.q + move.advance >= 1) {
-        car.laps++;
-        this.laps++;
-      }
+      car.travelled += move.advance;
+      const completed = Math.floor(car.travelled + 1e-9);
+      this.laps += completed - car.laps;
+      car.laps = completed;
       car.q = mod(car.q + move.advance);
       car.v = move.v;
       if (car.target !== null) {
@@ -663,6 +732,8 @@ export class Simulation {
         ).reduce((a, b) => a + b, 0) /
           1000),
       efficiency: target ? average / target : 0,
+      completedLaps: this.laps,
+      throughputPerMinute: this.time > 0 ? (this.laps * 60) / this.time : 0,
     };
   }
   sample() {
@@ -706,6 +777,7 @@ export class Simulation {
   }
   addObstacle(q, lane) {
     q = mod(q);
+    if (this.route.inside(q)) return false;
     lane = Math.round(clamp(lane, 0, this.config.lanes - 1));
     // Never place a physical object inside a vehicle or an existing object.
     const clear = [...this.cars, ...this.obstacles].every(

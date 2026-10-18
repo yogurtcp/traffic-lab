@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f4f3ed" />
     <meta
       name="description"
-      content="A little brake. A big traffic jam. Build a ring road, mix driver personalities, and discover how traffic waves form."
+      content="Build circle, rounded-rectangle, and four-arm traffic loops. Mix drivers, compare intersection rules, and measure completed-lap throughput."
     />
     <title>Loop Lab — a traffic playground</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -52,8 +52,28 @@
             <option value="perfect">Perfect flow</option>
             <option value="wave">Phantom jam</option>
             <option value="hogs">Left-lane blockade</option>
+            <option value="junction">Junction lab · 8 cars</option>
             <option value="custom" hidden>Custom experiment</option>
           </select>
+          <div class="layout-settings">
+            <label class="field-label" for="layout">Road layout</label>
+            <select id="layout">
+              <option value="circle">Circle</option>
+              <option value="rectangle">Rounded rectangle</option>
+              <option value="figure8">Figure-eight / four-arm loop</option>
+            </select>
+            <label class="field-label" for="intersection"
+              >Central intersection</label
+            >
+            <select id="intersection" disabled>
+              <option value="stop">All-way stop</option>
+              <option value="lights">Traffic lights</option>
+              <option value="roundabout">Roundabout</option>
+            </select>
+            <p id="intersection-note" class="small-copy">
+              Choose the figure-eight to add an intersection.
+            </p>
+          </div>
           <div class="road-settings">
             <div>
               <label class="field-label" for="lanes">Lanes</label>
@@ -66,7 +86,7 @@
               <input type="hidden" id="lanes" value="3" />
             </div>
             <div class="range-heading">
-              <label class="field-label" for="length">Inner lap length</label
+              <label class="field-label" for="length">Base lap length</label
               ><output id="length-value">1,000 m</output>
             </div>
             <input
@@ -146,9 +166,9 @@
             <div class="road-view" id="road-view">
               <canvas
                 id="road"
-                aria-label="Interactive circular road. Use the vehicle list below as a keyboard alternative."
+                aria-label="Interactive traffic road. Use the vehicle list below as a keyboard alternative."
               ></canvas>
-              <div class="road-caption">
+              <div class="road-caption" id="road-caption">
                 <span class="direction-arrow">↶</span> Counterclockwise · keep
                 right · pass left
               </div>
@@ -166,6 +186,7 @@
                 ><small>ROAD SPEED LIMIT</small>
               </div>
             </div>
+            <div id="junction-status" class="junction-status" hidden></div>
             <div class="transport">
               <div>
                 <button id="play" class="play">
@@ -204,6 +225,14 @@
             </p>
           </div>
           <div class="stats">
+            <div
+              class="stat throughput-stat"
+              title="Full laps travelled from each car's starting point. Repeat laps by the same car count again."
+            >
+              <span>THROUGHPUT</span>
+              <p><b id="stat-laps">0</b><small>full laps</small></p>
+              <em id="stat-throughput">0.0 laps/min · average</em>
+            </div>
             <div class="stat">
               <span>AVERAGE SPEED</span>
               <p><b id="stat-speed">—</b><small>km/h</small></p>
@@ -311,10 +340,15 @@
       </p>
       <h3>Run your own experiment</h3>
       <ol>
-        <li>Choose lanes, driver counts, and the shared reaction time.</li>
+        <li>
+          Choose a road layout, lanes, driver counts, and the shared reaction
+          time.
+        </li>
         <li>
           Apply, then press play. Cars begin evenly spaced within each lane, at
-          their personality’s desired speed.
+          their personality’s desired speed on uninterrupted loops. On the
+          four-arm layout, cars start at rest and are evenly spaced over open
+          road, keeping the junction clear.
         </li>
         <li>
           Brake a car for three seconds, cause a breakdown, or place an obstacle
@@ -327,17 +361,39 @@
       </ol>
       <h3>A few ground rules</h3>
       <p>
-        Traffic travels counterclockwise. Lane 1 is the inner, leftmost passing
-        lane. Regular and Speedster drivers pass moving traffic at 70 km/h or
-        below on the left; Stuntmen can pass either way. A stopped obstruction
-        and its connected queue can be avoided on either side. All drivers share
-        your reaction delay.
+        Circle and rectangle traffic travels counterclockwise. Lane 1 is the
+        leftmost passing lane. Regular and Speedster drivers pass moving traffic
+        at 70 km/h or below on the left; Stuntmen can pass either way. A stopped
+        obstruction and its connected queue can be avoided on either side. All
+        drivers share your reaction delay.
       </p>
       <p>
         Stuntmen top out at 160 km/h and squeeze into small gaps, forcing other
-        drivers to brake. Vehicles occupy both lanes during a lane change. Outer
-        laps are longer. Driver colors show personality; brake lights and the
-        speed overlay show slowdowns.
+        drivers to brake. Vehicles occupy both lanes during a lane change.
+        Driver colors show personality; brake lights and the speed overlay show
+        slowdowns.
+      </p>
+      <h3>Roads, junctions, and throughput</h3>
+      <p>
+        The figure-eight is a four-arm crossing joined by curved outer loops.
+        Choose an all-way stop, traffic lights, or a roundabout. All-way stops
+        take turns in arrival order after a complete stop. Lights alternate
+        east–west and north–south with amber and clearance time. At the
+        roundabout, approaching cars yield to traffic already circulating. This
+        simplified roundabout admits one circulating car at a time; green lights
+        can release multiple cars on one axis.
+      </p>
+      <p>
+        All drivers obey junction controls and hold their lane near the
+        crossing. Try the eight-car Junction lab preset to compare modes. Place
+        obstacles on approaches or outer loops; a breakdown inside the junction
+        blocks it until repaired.
+      </p>
+      <p>
+        Throughput counts every completed lap travelled from a car’s starting
+        point. The same car can contribute many laps. The rate is completed laps
+        per simulated minute, averaged since the last reset. Partial laps at
+        startup do not count.
       </p>
       <h3>A model, with limits</h3>
       <p>

@@ -107,6 +107,9 @@ function updateLaneButtons() {
   });
 }
 function showConfig(config) {
+  $("layout").value = config.layout ?? "circle";
+  $("intersection").value = config.intersection ?? "stop";
+  updateIntersectionFields();
   $("lanes").value = config.lanes;
   $("length").value = config.length;
   $("reaction").value = config.reaction;
@@ -116,6 +119,13 @@ function showConfig(config) {
   updateLabels();
   updateTotal();
 }
+function updateIntersectionFields() {
+  const active = $("layout").value === "figure8";
+  $("intersection").disabled = !active;
+  $("intersection-note").textContent = active
+    ? "Four approaches. Choose how traffic takes turns."
+    : "Choose the figure-eight to add an intersection.";
+}
 function updateLabels() {
   $("length-value").textContent =
     `${Number($("length").value).toLocaleString()} m`;
@@ -124,6 +134,8 @@ function updateLabels() {
 }
 function readConfig() {
   return {
+    layout: $("layout").value,
+    intersection: $("intersection").value,
     lanes: Number($("lanes").value),
     length: Number($("length").value),
     reaction: Number($("reaction").value),
@@ -163,8 +175,9 @@ function reset(config) {
   dirty = false;
   setRunning(false);
   $("apply").classList.remove("dirty");
-  $("setup-note").textContent =
-    "Evenly spaced in each lane. Ready when you are.";
+  $("setup-note").textContent = sim.route.entries.length
+    ? "Evenly spaced on open road; the junction starts clear."
+    : "Evenly spaced in each lane. Ready when you are.";
   showConfig(sim.config);
   try {
     localStorage.setItem("loop-lab-setup-v1", JSON.stringify(sim.config));
@@ -187,6 +200,7 @@ function populateVehicles() {
 }
 function draw() {
   const g = road.draw(sim, selected, speedOverlay);
+  $("road-view").dataset.layout = sim.config.layout;
   const scale = Math.min(1, (g.inner - 12) / 118);
   $("road-view").querySelector(".center-readout").style.transform =
     `translate(-50%,-45%) scale(${scale})`;
@@ -207,6 +221,17 @@ function updateHUD() {
   $("slow-total").textContent = `/ ${sim.cars.length} cars`;
   $("stat-changes").textContent = sim.changes;
   $("stat-efficiency").textContent = Math.round(stats.efficiency * 100);
+  $("stat-laps").textContent = stats.completedLaps;
+  $("stat-throughput").textContent =
+    `${stats.throughputPerMinute.toFixed(1)} laps/min · average`;
+  $("junction-status").hidden = !sim.route.entries.length;
+  $("junction-status").textContent = sim.junction.label(sim.time);
+  $("road-caption").textContent =
+    sim.config.layout === "figure8"
+      ? "Four-arm loop · keep right · pass left"
+      : sim.config.layout === "rectangle"
+        ? "Rounded loop · counterclockwise · keep right"
+        : "↶ Counterclockwise · keep right · pass left";
   const congested = stats.slow > sim.cars.length * 0.2 && sim.cars.length > 0;
   $("center-label").textContent =
     sim.time === 0
@@ -261,7 +286,7 @@ function updateHUD() {
                 ? "Accelerating"
                 : "Cruising";
     card.querySelector("p").textContent =
-      `${Math.round(car.v * 3.6)} / ${p.speed} km/h · lane ${car.lane + 1}\n${Number.isFinite(n.gap) ? Math.max(0, n.gap).toFixed(1) + " m to next vehicle" : "Open road ahead"}\n${status}`;
+      `${Math.round(car.v * 3.6)} / ${p.speed} km/h · lane ${car.lane + 1}\n${Number.isFinite(n.gap) ? Math.max(0, n.gap).toFixed(1) + " m to next vehicle" : "Open road ahead"}\n${status} · ${car.laps} full laps`;
     const button = card.querySelector(".breakdown-action");
     button.dataset.action = car.broken ? "repair" : "breakdown";
     button.textContent = car.broken ? "Repair" : "Break down";
@@ -337,6 +362,11 @@ for (const id of ["length", "reaction", "seed"])
     updateLabels();
     markDirty();
   });
+for (const id of ["layout", "intersection"])
+  $(id).addEventListener("change", () => {
+    updateIntersectionFields();
+    markDirty();
+  });
 $("shuffle").addEventListener("click", () => {
   $("seed").value = Math.floor(Math.random() * 999998) + 1;
   markDirty();
@@ -390,7 +420,11 @@ $("road").addEventListener("pointerdown", (e) => {
   if (tool === "obstacle") {
     const location = road.roadLocation(x, y, sim);
     if (!location) {
-      toast("Place the obstacle on a lane of the road.");
+      toast(
+        sim.config.layout === "figure8"
+          ? "Place obstacles on an approach or outer loop, outside the junction."
+          : "Place the obstacle on a lane of the road.",
+      );
       return;
     }
     if (sim.addObstacle(location.q, location.lane)) {
