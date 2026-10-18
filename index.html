@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f3ed" />
+    <meta
+      name="description"
+      content="A little brake. A big traffic jam. Build a ring road, mix driver personalities, and discover how traffic waves form."
+    />
+    <title>Loop Lab — a traffic playground</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./src-1cf09a900565/style.css" />
+    <script type="module" src="./src-1cf09a900565/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Loop Lab home"
+        ><span class="brand-mark">◎</span> LOOP<span class="brand-light"
+          >LAB</span
+        ><span class="beta">EXPERIMENT 001</span></a
+      >
+      <span class="top-caption">A little brake. A big chain reaction.</span>
+      <button class="quiet" id="about-open">
+        How it works <span aria-hidden="true">↗</span>
+      </button>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <p class="eyebrow">THE TRAFFIC PLAYGROUND</p>
+          <h1>Meet your next traffic jam.</h1>
+          <p>One endless road. Eight kinds of driver. See what happens.</p>
+        </div>
+        <a
+          class="source-link"
+          href="https://github.com/yogurtcp/traffic-lab"
+          target="_blank"
+          rel="noreferrer"
+          >Source code ↗</a
+        >
+      </div>
+      <div class="workspace">
+        <aside class="setup panel">
+          <div class="section-heading">
+            <h2>Build your experiment</h2>
+            <span class="step-label">01 / SETUP</span>
+          </div>
+          <label class="field-label" for="preset">Start with a scenario</label>
+          <select id="preset">
+            <option value="mixed">Mixed company</option>
+            <option value="perfect">Perfect flow</option>
+            <option value="wave">Phantom jam</option>
+            <option value="hogs">Left-lane blockade</option>
+            <option value="custom" hidden>Custom experiment</option>
+          </select>
+          <div class="road-settings">
+            <div>
+              <label class="field-label" for="lanes">Lanes</label>
+              <div
+                class="segmented"
+                id="lane-buttons"
+                role="group"
+                aria-label="Number of lanes"
+              ></div>
+              <input type="hidden" id="lanes" value="3" />
+            </div>
+            <div class="range-heading">
+              <label class="field-label" for="length">Inner lap length</label
+              ><output id="length-value">1,000 m</output>
+            </div>
+            <input
+              id="length"
+              type="range"
+              min="600"
+              max="2000"
+              step="100"
+              value="1000"
+            />
+            <div class="range-heading">
+              <label class="field-label" for="reaction"
+                >Reaction time
+                <span
+                  title="All drivers respond to traffic as it was this many seconds ago."
+                  >ⓘ</span
+                ></label
+              ><output id="reaction-value">0.9 s</output>
+            </div>
+            <input
+              id="reaction"
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value="0.9"
+            />
+          </div>
+          <div class="section-heading driver-heading">
+            <h2>The driver mix</h2>
+            <span class="total-pill"><b id="total">54</b> cars</span>
+          </div>
+          <p class="small-copy">Choose exactly who gets on the road.</p>
+          <div id="drivers" class="drivers"></div>
+          <div class="seed-row">
+            <label for="seed">Shuffle seed</label
+            ><input
+              id="seed"
+              type="number"
+              min="1"
+              max="999999"
+              value="42"
+            /><button
+              id="shuffle"
+              class="quiet"
+              title="Choose a new shuffle seed"
+              aria-label="Shuffle driver order"
+            >
+              ⤨
+            </button>
+          </div>
+          <button id="apply" class="apply">
+            Apply & reset <span aria-hidden="true">↻</span>
+          </button>
+          <p id="setup-note" class="setup-note" aria-live="polite">
+            Evenly spaced in each lane. Ready when you are.
+          </p>
+        </aside>
+        <section class="experiment" aria-label="Traffic simulation">
+          <div class="simulation panel">
+            <div class="sim-top">
+              <div class="live-label">
+                <span id="state-dot" class="state-dot"></span
+                ><b id="state">READY TO ROLL</b>
+              </div>
+              <span id="sim-time" class="mono">00:00</span>
+              <div class="speed-control">
+                <label for="rate">Time</label
+                ><select id="rate">
+                  <option value="0.5">½×</option>
+                  <option value="1" selected>1×</option>
+                  <option value="2">2×</option>
+                  <option value="5">5×</option>
+                </select>
+              </div>
+            </div>
+            <div class="road-view" id="road-view">
+              <canvas
+                id="road"
+                aria-label="Interactive circular road. Use the vehicle list below as a keyboard alternative."
+              ></canvas>
+              <div class="road-caption">
+                <span class="direction-arrow">↶</span> Counterclockwise · keep
+                right · pass left
+              </div>
+              <div id="selection" class="selection" hidden></div>
+              <div class="map-key">
+                <span><i class="free"></i>Flowing</span
+                ><span><i class="slowing"></i>Slowing</span
+                ><span><i class="stopped"></i>Stopped</span>
+              </div>
+              <div class="center-readout">
+                <p class="eyebrow" id="center-label">ROOM TO EXPERIMENT</p>
+                <div><b id="center-speed">—</b><span>km/h</span></div>
+                <p id="center-copy">Press play. Then stir things up.</p>
+                <span class="speed-limit">90</span
+                ><small>ROAD SPEED LIMIT</small>
+              </div>
+            </div>
+            <div class="transport">
+              <div>
+                <button id="play" class="play">
+                  <span aria-hidden="true">▶</span> Start simulation</button
+                ><button
+                  id="step"
+                  class="square"
+                  title="Pause and advance one simulated second"
+                  aria-label="Advance one second"
+                >
+                  +1s</button
+                ><button
+                  id="restart"
+                  class="square"
+                  title="Restart the same experiment"
+                  aria-label="Restart experiment"
+                >
+                  ↻
+                </button>
+              </div>
+              <span class="keyboard-hint"><kbd>space</kbd> to pause</span>
+            </div>
+            <div class="tools" role="group" aria-label="Road interaction tool">
+              <span class="tools-label">STIR THINGS UP</span
+              ><button data-tool="select" class="active">
+                ↖ <span>Inspect</span></button
+              ><button data-tool="brake">Ⅱ <span>Brake</span></button
+              ><button data-tool="breakdown">⚡ <span>Break down</span></button
+              ><button data-tool="obstacle">△ <span>Obstacle</span></button
+              ><button data-tool="remove">
+                ⌫ <span>Remove / repair</span>
+              </button>
+            </div>
+            <p id="tool-hint" class="tool-hint" aria-live="polite">
+              Click a car to see its personality, speed, and following gap.
+            </p>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <span>AVERAGE SPEED</span>
+              <p><b id="stat-speed">—</b><small>km/h</small></p>
+            </div>
+            <div class="stat">
+              <span>IN SLOW TRAFFIC</span>
+              <p>
+                <b id="stat-slow">0</b><small id="slow-total">/ 54 cars</small>
+              </p>
+              <em>Below 30 km/h</em>
+            </div>
+            <div class="stat">
+              <span>LANE CHANGES</span>
+              <p><b id="stat-changes">0</b><small>total</small></p>
+            </div>
+            <div class="stat">
+              <span>FLOW EFFICIENCY</span>
+              <p><b id="stat-efficiency">100</b><small>%</small></p>
+              <em>Speed / desired speed</em>
+            </div>
+          </div>
+          <div class="charts panel">
+            <div class="chart-heading">
+              <div>
+                <p class="eyebrow">WATCH THE RIPPLE EFFECT</p>
+                <h2>Small disruptions travel.</h2>
+              </div>
+              <button id="pulse" class="pulse">
+                Ⅱ Try a 3-second brake pulse
+              </button>
+            </div>
+            <p id="insight" class="insight">
+              Try “Phantom jam”, press play, then brake one car. Watch what the
+              drivers behind it do.
+            </p>
+            <div class="chart-grid">
+              <div>
+                <div class="graph-label">
+                  <b>Average speed</b
+                  ><span>Last 2 simulated minutes · km/h</span>
+                </div>
+                <canvas
+                  id="speed-chart"
+                  aria-label="Average speed over the last two simulated minutes"
+                ></canvas>
+              </div>
+              <div>
+                <div class="graph-label">
+                  <b>A road’s-eye view</b><span>Position → · time ↓</span>
+                </div>
+                <canvas
+                  id="wave-chart"
+                  aria-label="Speed by road position over time. Red diagonal bands show slow traffic waves."
+                ></canvas>
+                <p class="heat-key">
+                  Empty road <i></i> 0 <span></span> 120+ km/h
+                </p>
+              </div>
+            </div>
+          </div>
+          <details class="details panel">
+            <summary>
+              Vehicle controls & experiment log <span>Keyboard accessible</span>
+            </summary>
+            <div class="details-content">
+              <div class="vehicle-controls">
+                <label for="vehicle">Vehicle</label
+                ><select id="vehicle"></select
+                ><button id="vehicle-inspect">Inspect</button
+                ><button id="vehicle-brake">Brake 3s</button
+                ><button id="vehicle-break">Break down</button
+                ><button id="vehicle-repair">Repair</button
+                ><button id="clear">Clear all incidents</button>
+              </div>
+              <ol id="events">
+                <li>No interventions yet. The road is yours.</li>
+              </ol>
+            </div>
+          </details>
+        </section>
+      </div>
+      <footer>
+        Built for curiosity.
+        <span>A simplified traffic model, with real chain reactions.</span
+        ><button class="quiet" id="about-footer">
+          Inside the simulation ↗
+        </button>
+      </footer>
+    </main>
+    <div id="toast" role="status" hidden></div>
+    <dialog id="about">
+      <button
+        id="about-close"
+        class="dialog-close"
+        aria-label="Close explanation"
+      >
+        ×
+      </button>
+      <p class="eyebrow">INSIDE LOOP LAB</p>
+      <h2>Why does traffic stop<br />for no apparent reason?</h2>
+      <p>
+        A driver brakes. The next driver notices a moment later and brakes a
+        little harder. Repeat that down a line of cars and a slow wave can
+        travel backward, even after the original driver has moved on.
+      </p>
+      <h3>Run your own experiment</h3>
+      <ol>
+        <li>Choose lanes, driver counts, and the shared reaction time.</li>
+        <li>
+          Apply, then press play. Cars begin evenly spaced within each lane, at
+          their personality’s desired speed.
+        </li>
+        <li>
+          Brake a car for three seconds, cause a breakdown, or place an obstacle
+          on an empty patch of road.
+        </li>
+        <li>
+          Compare the graphs. Red diagonal bands in the road view chart reveal
+          moving slowdowns.
+        </li>
+      </ol>
+      <h3>A few ground rules</h3>
+      <p>
+        Traffic travels counterclockwise. Lane 1 is the inner, leftmost passing
+        lane. Regular and Speedster drivers pass moving traffic at 70 km/h or
+        below on the left; Stuntmen can pass either way. A stopped obstruction
+        can be avoided on either side. All drivers share your reaction delay.
+      </p>
+      <p>
+        Stuntmen top out at 160 km/h. Vehicles occupy both lanes during a lane
+        change. Outer laps are longer. Driver colors show personality; brake
+        lights and the speed overlay show slowdowns.
+      </p>
+      <h3>A model, with limits</h3>
+      <p>
+        Car following uses an Intelligent Driver Model–style acceleration rule
+        with delayed traffic perception and custom lane choices. It’s an
+        educational experiment, not a calibrated prediction. A final safety
+        guard prevents overlapping cars, even with extreme reaction delays; it
+        can brake faster than a real driver. There are no crashes.
+      </p>
+      <p>
+        <a
+          href="https://www.mtreiber.de/publications/timedelay_TRR07_final.pdf"
+          target="_blank"
+          rel="noreferrer"
+          >Read about reaction delay and traffic stability ↗</a
+        >
+      </p>
+      <label class="overlay-control"
+        ><input id="heat-overlay" type="checkbox" /> Color cars by speed instead
+        of personality</label
+      >
+    </dialog>
+  </body>
+</html>
