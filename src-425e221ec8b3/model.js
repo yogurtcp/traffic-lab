@@ -507,6 +507,12 @@ export class Simulation {
     const desiredSpeed = PERSONALITIES[car.type].speed / 3.6;
     const passMargin = 2 / 3.6;
     const lookAhead = Math.max(55, old.v * 3.5);
+    const passingRange = Math.max(80, desiredSpeed * 6);
+    const slowAhead =
+      front &&
+      gap < passingRange &&
+      front.v * 3.6 <= 70.5 &&
+      front.v + passMargin < desiredSpeed;
     const obstruction =
       front &&
       (front.obstacle ||
@@ -556,12 +562,39 @@ export class Simulation {
         .sort((a, b) => b.score - a.score)
         .map((x) => x.l);
     } else {
+      // The no-undertaking rule may hold us behind a slower car several lanes
+      // to the left even when our own lane is empty. Move left in stages to
+      // get behind it, then use its left-hand lane to complete a legal pass.
+      let heldByLeft = false;
+      if (car.lane > 1) {
+        const queues = this.obstructionQueues(delayed);
+        for (let lane = 1; lane < car.lane; lane++) {
+          const left = this.neighbors(old, lane, delayed);
+          const vehicle = left.front;
+          if (
+            vehicle &&
+            !vehicle.obstacle &&
+            !vehicle.broken &&
+            !queues[lane].has(vehicle.id) &&
+            !this.junction.inApproachQueue(vehicle, this) &&
+            left.gap < passingRange &&
+            vehicle.v * 3.6 <= 70.5 &&
+            vehicle.v + passMargin < desiredSpeed &&
+            (vehicle.v * this.laneLength(car.lane)) / this.laneLength(lane) <=
+              old.v + 0.05
+          ) {
+            heldByLeft = true;
+            break;
+          }
+        }
+      }
+      if (heldByLeft && !blocked) choices.push(car.lane - 1);
       if (blocked && car.lane > 0) {
         const left = this.neighbors(old, car.lane - 1, delayed);
         // A safe gap can still lead straight into slower traffic. Only make
         // a discretionary pass if the destination lane offers a useful pace.
         const leftPace =
-          left.front && left.gap < Math.max(80, desiredSpeed * 6)
+          left.front && left.gap < passingRange
             ? Math.min(desiredSpeed, left.front.v)
             : desiredSpeed;
         if (obstruction || leftPace > front.v + passMargin)
@@ -570,13 +603,25 @@ export class Simulation {
       // Moving right to escape a stationary obstacle is permitted. Passing
       // moving traffic on the right is not; acceleration also enforces that.
       if (obstruction && blocked) choices.push(car.lane + 1);
-      if (!blocked && car.lane < this.config.lanes - 1) {
+      if (
+        !blocked &&
+        !slowAhead &&
+        !heldByLeft &&
+        car.lane < this.config.lanes - 1
+      ) {
         const right = this.neighbors(old, car.lane + 1, delayed);
         const clearRoad =
           car.type === "regular"
             ? Math.max(16, car.v * 1.1)
             : Math.max(65, car.v * 4);
-        if (right.gap > clearRoad) choices.push(car.lane + 1);
+        // Stay in the passing lane while the slower vehicle is still ahead
+        // on our right. Moving back behind it just restarts the same pass.
+        const rightPace =
+          right.front && right.gap < passingRange
+            ? right.front.v
+            : desiredSpeed;
+        if (right.gap > clearRoad && rightPace + passMargin >= desiredSpeed)
+          choices.push(car.lane + 1);
       }
     }
     for (const lane of choices) {
