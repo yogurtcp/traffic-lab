@@ -230,6 +230,62 @@ test("a lane change requires space both in front and behind", () => {
   sim.considerLane(c, sim.snapshot());
   assert.equal(c.target, null);
 });
+function stuntScenario(frontDistance = 14, frontSpeed = 20) {
+  const sim = new Simulation(
+    config({ stuntman: 1, regular: 3 }, { lanes: 2, reaction: 0.9 }),
+  );
+  const stunt = sim.cars.find((c) => c.type === "stuntman");
+  const [leader, targetLeader, rear] = sim.cars.filter((c) => c !== stunt);
+  Object.assign(stunt, { lane: 0, from: 0, q: 0, v: 25, cooldown: 0 });
+  Object.assign(leader, { lane: 0, from: 0, q: 0.012, v: 15, cooldown: 100 });
+  Object.assign(targetLeader, {
+    lane: 1,
+    from: 1,
+    q: frontDistance / sim.laneLength(1),
+    v: frontSpeed,
+    cooldown: 100,
+  });
+  Object.assign(rear, {
+    lane: 1,
+    from: 1,
+    q: 1 - 8 / sim.laneLength(1),
+    v: 25,
+    cooldown: 100,
+  });
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  return { sim, stunt, rear, targetLeader };
+}
+test("stuntmen take tight gaps that regular drivers reject, even when both lanes require braking", () => {
+  const { sim, stunt } = stuntScenario();
+  assert.equal(sim.safeLane(stunt, 1), true);
+  assert.equal(sim.safeLane({ ...stunt, type: "regular" }, 1), false);
+  const state = sim.snapshot();
+  assert.equal(sim.acceleration(stunt, 0, state), -8);
+  assert.equal(sim.acceleration(stunt, 1, state), -8);
+  sim.considerLane(stunt, state);
+  assert.equal(stunt.target, 1);
+});
+test("a stuntman cutting in makes the following regular driver brake harder without overlap", () => {
+  const { sim, stunt, rear } = stuntScenario(100, 25);
+  const control = stuntScenario(100, 25);
+  control.stunt.cooldown = 100;
+  sim.considerLane(stunt, sim.snapshot());
+  assert.equal(stunt.target, 1);
+  let hardest = 0;
+  for (let i = 0; i < 30; i++) {
+    sim.step();
+    control.sim.step();
+    hardest = Math.min(hardest, rear.a);
+    checkSafe(sim);
+  }
+  assert.ok(hardest < -3);
+  assert.ok(rear.v < control.rear.v - 2);
+});
+test("stuntmen still reject gaps without physical clearance", () => {
+  const { sim, stunt, targetLeader } = stuntScenario();
+  targetLeader.q = (CAR_LENGTH + 0.5) / sim.laneLength(1);
+  assert.equal(sim.safeLane(stunt, 1), false);
+});
 test("lawful drivers cannot pass on the right, including two lanes across; stuntmen can", () => {
   for (const type of ["regular", "speedster", "stuntman"]) {
     const sim = new Simulation(
@@ -261,6 +317,67 @@ test("a broken vehicle in the leftmost lane can be avoided on its right", () => 
   broken.v = 0;
   sim.considerLane(car, sim.snapshot());
   assert.equal(car.target, 1);
+});
+test("regular drivers move right around a left-lane obstacle or its connected queue", () => {
+  for (const queue of [false, true]) {
+    const sim = new Simulation(
+      config({ regular: queue ? 2 : 1 }, { lanes: 2, reaction: 0 }),
+    );
+    const car = sim.cars[0];
+    Object.assign(car, { lane: 0, from: 0, q: 0, v: 0, cooldown: 0 });
+    if (queue) Object.assign(sim.cars[1], { lane: 0, from: 0, q: 0.02, v: 0 });
+    assert.equal(sim.addObstacle(0.04, 0), true);
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(car.target, 1);
+  }
+});
+test("right-lane traffic can pass an obstruction queue, clearing room for a merge", () => {
+  const sim = new Simulation(
+    config({ regular: 2 }, { lanes: 2, reaction: 0.9 }),
+  );
+  const [left, right] = sim.cars;
+  Object.assign(left, { lane: 0, from: 0, q: 0.02, v: 0, cooldown: 0 });
+  Object.assign(right, { lane: 1, from: 1, q: 0.02, v: 0, cooldown: 100 });
+  assert.equal(sim.addObstacle(0.03, 0), true);
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  assert.equal(sim.safeLane(left, 1), false);
+  sim.advance(25);
+  assert.ok(
+    right.q > 0.1,
+    "the right lane must keep moving past the blocked queue",
+  );
+  assert.ok(
+    left.q > 0.03,
+    "the blocked car must eventually merge and pass the obstacle",
+  );
+  checkSafe(sim);
+});
+test("an unrelated distant obstacle does not permit ordinary passing on the right", () => {
+  const sim = new Simulation(
+    config({ regular: 1, hog: 1 }, { lanes: 2, reaction: 0 }),
+  );
+  const car = sim.cars.find((c) => c.type === "regular");
+  const hog = sim.cars.find((c) => c.type === "hog");
+  Object.assign(car, { lane: 1, from: 1, q: 0, cooldown: 100 });
+  Object.assign(hog, { lane: 0, from: 0, q: 0.001, cooldown: 100 });
+  sim.addObstacle(0.5, 0);
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  assert.equal(sim.obstructionQueues()[0].has(hog.id), false);
+  sim.advance(1);
+  assert.ok(car.q < hog.q);
+});
+test("a left-lane obstacle cannot deadlock every lane of regular traffic", () => {
+  for (const lanes of [2, 3]) {
+    const sim = new Simulation(
+      config({ regular: 36 }, { lanes, reaction: 0.9 }),
+    );
+    assert.equal(sim.addObstacle(0.04, 0), true);
+    sim.advance(90);
+    assert.ok(sim.stats.average > 15, `${lanes} lanes must retain useful flow`);
+    assert.ok(sim.stats.stopped < sim.cars.length / 2);
+    assert.ok(sim.laps > 0);
+    checkSafe(sim);
+  }
 });
 test("dense traffic remains finite, bounded, and separated through abrupt incidents and lane changes", () => {
   for (const lanes of [1, 3, 5]) {

@@ -26,18 +26,18 @@ Presets: **Mixed company**, **Perfect flow**, **Phantom jam**, and **Left-lane b
 
 ## Driver personalities
 
-| Driver            | Desired speed    | Behavior                                                                             |
-| ----------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| Regular           | 90 km/h          | Passes cars doing 70 km/h or less on the left; keeps right when clear.               |
-| Slowpoke          | 70 km/h          | Slower cruise, moderate following space; passes slower vehicles on the left.         |
-| Annoying slowpoke | 70 km/h          | Stays in the leftmost lane. Avoids stationary obstructions and returns left.         |
-| Speedster         | 110 km/h         | Same passing policy as Regular, with a higher desired speed.                         |
-| Stuntman          | 160 km/h maximum | Accelerates hard, follows closely, and passes on either side through available gaps. |
-| Cautious          | 80 km/h          | Large following distance, gentle acceleration, and conservative lane changes.        |
-| Tailgater         | 90 km/h          | Short following distance, eager acceleration, and hard braking.                      |
-| Eco driver        | 90 km/h          | Gentle acceleration and extra space to absorb speed changes.                         |
+| Driver            | Desired speed    | Behavior                                                                      |
+| ----------------- | ---------------- | ----------------------------------------------------------------------------- |
+| Regular           | 90 km/h          | Passes cars doing 70 km/h or less on the left; keeps right when clear.        |
+| Slowpoke          | 70 km/h          | Slower cruise, moderate following space; passes slower vehicles on the left.  |
+| Annoying slowpoke | 70 km/h          | Stays in the leftmost lane. Avoids stationary obstructions and returns left.  |
+| Speedster         | 110 km/h         | Same passing policy as Regular, with a higher desired speed.                  |
+| Stuntman          | 160 km/h maximum | Cuts into small gaps on either side, forcing following drivers to brake.      |
+| Cautious          | 80 km/h          | Large following distance, gentle acceleration, and conservative lane changes. |
+| Tailgater         | 90 km/h          | Short following distance, eager acceleration, and hard braking.               |
+| Eco driver        | 90 km/h          | Gentle acceleration and extra space to absorb speed changes.                  |
 
-The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it. All drivers use the same selected perception delay. Passing moving traffic on the right is prevented for everyone except Stuntman, including across nonadjacent lanes. Stationary obstacles and broken vehicles can be avoided on either side.
+The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it. All drivers use the same selected perception delay. Ordinary passing on the right is prevented for everyone except Stuntman, including across nonadjacent lanes. Stationary obstacles, broken vehicles, and their connected slow queues can be avoided on either side. This exception keeps the adjacent lane moving so blocked drivers can find a gap to merge; an unrelated obstacle elsewhere on the ring does not allow passing on the right.
 
 Ordinary passing requires traffic ahead to be at least 2 km/h below the driver's desired speed and not pulling away. The passing lane must also offer more than 2 km/h of speed advantage over that traffic. A slowpoke therefore follows another car doing 70 km/h instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
 
@@ -52,7 +52,7 @@ Ordinary passing requires traffic ahead to be at least 2 km/h below the driver's
 
 This is an educational microsimulation, not a calibrated traffic forecast. Car following uses an [Intelligent Driver Model–style](https://www.mtreiber.de/publications/timedelay_TRR07_final.pdf) rule: acceleration depends on desired speed, following gap, and closing speed. The app applies the common reaction delay to past traffic snapshots; personality parameters set acceleration, comfortable braking, and desired following time. Lane choices are custom rules rather than the full MOBIL model.
 
-Integration uses a fixed 0.05 s step, independent of rendering and playback speed. Lane 1 is the inner, leftmost lane, and traffic travels counterclockwise. Outer laps grow by `2π × 3.7 m` per lane; motion and passing checks account for their different lengths. Lane changes take 1.6 seconds, reserve both lanes, and require safe front and rear gaps. Vehicles are 4.5 m long; the drawing enlarges their sprites for visibility.
+Integration uses a fixed 0.05 s step, independent of rendering and playback speed. Lane 1 is the inner, leftmost lane, and traffic travels counterclockwise. Outer laps grow by `2π × 3.7 m` per lane; motion and passing checks account for their different lengths. Lane changes take 1.6 seconds and reserve both lanes. Ordinary drivers require comfortable front and rear gaps. Stuntmen accept much smaller physical gaps, disregard the following driver's comfortable braking distance, and can start another change 1.8 seconds after the previous one began. They consider extra room and faster traffic even when both lane acceleration estimates call for hard braking. Vehicles are 4.5 m long; the drawing enlarges their sprites for visibility.
 
 A final safety guard prevents vehicle overlap and illegal right-side passing, even with extreme delays or sudden obstructions. It can brake more sharply than the car-following model, so crashes are excluded. Reaction delay is therefore visible in ordinary following but can be overridden by this guard. This is a closed ring without entrances, exits, intersections, trucks, weather, or crash physics. The optional lane-avoiding behavior around incidents uses the delayed information, while the final merge safety check uses current positions.
 
