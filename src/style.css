@@ -1192,6 +1192,9 @@ dialog a {
   }
 }
 @media (max-width: 400px) {
+  .beta {
+    display: none;
+  }
   .drivers {
     column-gap: 13px;
   }

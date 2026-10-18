@@ -49,23 +49,25 @@ try {
     if (e.stderr?.includes("404")) exists = false;
     else throw e;
   }
-  run(
-    "gh",
-    [
-      "api",
-      "--method",
-      exists ? "PUT" : "POST",
-      `repos/${repository}/pages`,
-      "--input",
-      "-",
-    ],
-    {
-      input: JSON.stringify({
-        build_type: "legacy",
-        source: { branch: "gh-pages", path: "/" },
-      }),
-    },
-  );
+  const configure = (method) =>
+    run(
+      "gh",
+      ["api", "--method", method, `repos/${repository}/pages`, "--input", "-"],
+      {
+        input: JSON.stringify({
+          build_type: "legacy",
+          source: { branch: "gh-pages", path: "/" },
+        }),
+      },
+    );
+  try {
+    configure(exists ? "PUT" : "POST");
+  } catch (error) {
+    // Pushing the first gh-pages branch can enable Pages between the read
+    // and create calls. Continue with the existing configuration in that race.
+    if (!exists && error.stderr?.includes("409")) configure("PUT");
+    else throw error;
+  }
   run("gh", ["api", "--method", "POST", `repos/${repository}/pages/builds`]);
   console.log(
     `Deployment submitted: https://${repository.split("/")[0]}.github.io/${repository.split("/")[1]}/`,
