@@ -255,7 +255,12 @@ function stuntScenario(frontDistance = 14, frontSpeed = 20) {
   sim.history = Array.from({ length: 43 }, () => sim.snapshot());
   return { sim, stunt, rear, targetLeader };
 }
-function leftMergeScenario(rearSpeed = 90, rearGap = 30, reaction = 0.9) {
+function leftMergeScenario(
+  rearSpeed = 90,
+  rearGap = 30,
+  reaction = 0.9,
+  frontGap,
+) {
   const sim = new Simulation(
     config({ regular: 1, slowpoke: 1, speedster: 1 }, { lanes: 2, reaction }),
   );
@@ -266,7 +271,10 @@ function leftMergeScenario(rearSpeed = 90, rearGap = 30, reaction = 0.9) {
   Object.assign(lead, {
     lane: 1,
     from: 1,
-    q: 0.235,
+    q:
+      frontGap === undefined
+        ? 0.235
+        : 0.2 + (frontGap + CAR_LENGTH) / sim.laneLength(1),
     v: 70 / 3.6,
     cooldown: 100,
   });
@@ -284,6 +292,7 @@ function leftMergeScenario(rearSpeed = 90, rearGap = 30, reaction = 0.9) {
 test("regulars reject a left merge that would force sharp braking despite physical clearance", () => {
   for (const [rearSpeed, rearGap] of [
     [90, 30],
+    [90, 38],
     [110, 60],
   ]) {
     const { sim, car } = leftMergeScenario(rearSpeed, rearGap);
@@ -292,11 +301,73 @@ test("regulars reject a left merge that would force sharp braking despite physic
     assert.equal(car.target, null);
   }
 });
-test("regular left merges allow for closing during reaction time and lane-change duration", () => {
-  const instant = leftMergeScenario(110, 100, 0);
+test("regular left merges still allow for a faster follower closing during reaction time", () => {
+  const instant = leftMergeScenario(110, 90, 0, 80);
   assert.equal(instant.sim.safeLane(instant.car, 0), true);
-  const { sim, car } = leftMergeScenario(110, 100, 2);
+  const { sim, car } = leftMergeScenario(110, 90, 2, 80);
   assert.equal(sim.safeLane(car, 0), false);
+});
+test("regulars use a smaller left-merge gap with only comfortable follower braking", () => {
+  const { sim, car, rear } = leftMergeScenario(90, 38, 0.9, 80);
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+  let hardest = 0;
+  for (let i = 0; i < 80; i++) {
+    sim.step();
+    hardest = Math.min(hardest, rear.a);
+    checkSafe(sim);
+  }
+  assert.ok(hardest >= -2.5, `following driver braked at ${hardest} m/s²`);
+});
+test("regulars return right into everyday gaps and still reject a close fast follower", () => {
+  for (const [rearSpeed, rearGap, accepted] of [
+    [90, 38, true],
+    [110, 20, false],
+  ]) {
+    const { sim, car, rear } = leftMergeScenario(rearSpeed, rearGap);
+    const lead = sim.cars.find((c) => c.type === "slowpoke");
+    Object.assign(car, { lane: 0, from: 0 });
+    Object.assign(lead, {
+      lane: 1,
+      from: 1,
+      q: car.q + (30 + CAR_LENGTH) / sim.laneLength(1),
+      v: 25,
+      type: "regular",
+    });
+    Object.assign(rear, {
+      lane: 1,
+      from: 1,
+      q: car.q - (rearGap + CAR_LENGTH) / sim.laneLength(1),
+    });
+    sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(car.target, accepted ? 1 : null);
+    if (!accepted) continue;
+    let hardest = 0;
+    for (let i = 0; i < 80; i++) {
+      sim.step();
+      hardest = Math.min(hardest, rear.a);
+      checkSafe(sim);
+    }
+    assert.ok(hardest >= -2.5, `following driver braked at ${hardest} m/s²`);
+  }
+});
+test("regulars can merge in crawling traffic with five metres ahead and eight behind", () => {
+  const { sim, car, rear } = leftMergeScenario(10, 8, 0.9, 20);
+  car.v = 10 / 3.6;
+  sim.cars.find((c) => c.type === "slowpoke").v = 0;
+  sim.cars.push({
+    ...rear,
+    id: 99,
+    q: car.q + (5 + CAR_LENGTH) / sim.laneLength(0),
+  });
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+  for (let i = 0; i < 80; i++) {
+    sim.step();
+    checkSafe(sim);
+  }
 });
 test("regulars wait for an approaching car to pass before moving left", () => {
   const { sim, car, rear } = leftMergeScenario(110, 60);

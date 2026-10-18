@@ -63,7 +63,9 @@ The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it.
 
 Ordinary passing requires traffic ahead to be at least 2 km/h below the driver's desired speed and not pulling away. The passing lane must also offer more than 2 km/h of speed advantage over that traffic. A slowpoke therefore follows another car doing 70 km/h instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
 
-Before moving left, ordinary drivers also check the effect on the car behind in the destination lane. They allow for the gap closing during the shared reaction delay and 1.6-second lane change, then use that follower's own car-following rule to estimate braking. They wait if the predicted braking would exceed 1.5 m/s² (or the follower's comfortable braking setting, if lower). A faster car approaching from behind therefore needs more room, and the driver can merge after it passes. Stuntmen skip this courtesy check.
+Regulars accept smaller lane-change gaps than steady cruising gaps: at least 4 m, with a half-second speed allowance and extra room for closing traffic. Returning right requires about 28 m of clear road at 90 km/h, rather than 100 m. Before moving either way, they check the destination follower's predicted braking after the shared reaction delay and the first half of the lane change. The estimate also accounts for their own slowing in the source lane. They accept comfortable braking up to 2.5 m/s², capped by that follower's own comfort setting, and still wait for a close, faster car to pass. Right-side obstacle bypasses retain their existing exception so a blocked queue can merge into moving traffic.
+
+Other ordinary personalities retain their larger merge margins and the stricter left-merge check: the shared reaction delay plus the full 1.6-second maneuver, with at most 1.5 m/s² predicted follower braking (or its comfort setting, if lower). Cautious drivers still require extra space. Stuntmen skip the courtesy check and accept much tighter cut-ins.
 
 ## What to watch
 
