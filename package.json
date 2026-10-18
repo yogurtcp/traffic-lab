@@ -1,0 +1,13 @@
+{
+  "name": "traffic-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "An interactive ring-road traffic experiment",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.js",
+    "build": "node scripts/build.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  }
+}
