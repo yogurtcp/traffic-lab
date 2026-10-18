@@ -6,6 +6,7 @@ import {
   PERSONALITIES,
   STEP,
   CAR_LENGTH,
+  mod,
   normalizeConfig,
 } from "../src/model.js";
 
@@ -145,6 +146,103 @@ test("regular and speedster overtake slow traffic to the left; stuntmen also use
     sim.considerLane(c, sim.snapshot());
     assert.equal(c.target, type === "stuntman" ? 1 : null);
   }
+});
+function completePassScenario({
+  layout = "circle",
+  lanes = 2,
+  reaction = 0.9,
+  speed = 70,
+  gap = 45,
+  lane = 1,
+  slowLane = 1,
+} = {}) {
+  const sim = new Simulation(
+    config({ regular: 1, slowpoke: 1 }, { layout, lanes, reaction }),
+  );
+  const car = sim.cars.find((c) => c.type === "regular");
+  const slow = sim.cars.find((c) => c.type === "slowpoke");
+  Object.assign(car, { lane, from: lane, q: 0.2, v: speed / 3.6, cooldown: 0 });
+  Object.assign(slow, {
+    lane: slowLane,
+    from: slowLane,
+    q: 0.2 + (gap + CAR_LENGTH) / sim.laneLength(slowLane),
+    v: 70 / 3.6,
+    cooldown: 1000,
+  });
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  return { sim, car, slow };
+}
+test("Regulars complete the Slowpoke pass, accelerate, then return right without weaving", () => {
+  for (const layout of ["circle", "rectangle"])
+    for (const lanes of [2, 3])
+      for (const reaction of [0, 0.9, 2])
+        for (const speed of [60, 65, 70, 90])
+          for (const gap of [30, 45, 70]) {
+            const { sim, car, slow } = completePassScenario({
+              layout,
+              lanes,
+              reaction,
+              speed,
+              gap,
+            });
+            const label = `${layout}, ${lanes} lanes, reaction ${reaction}, speed ${speed}, gap ${gap}`;
+            let passed = false;
+            for (let step = 0; step < 1200; step++) {
+              const changes = sim.changes;
+              sim.step();
+              const relative = mod(car.q - slow.q + 0.5) - 0.5;
+              if (relative > 0 && !passed) {
+                assert.ok(
+                  car.lane < slow.lane,
+                  `must pass on the left: ${label}`,
+                );
+                passed = true;
+              }
+              if (sim.changes > changes && car.target > car.from)
+                assert.ok(passed, `returned right before passing: ${label}`);
+              checkSafe(sim);
+            }
+            assert.ok(passed, `never completed the pass: ${label}`);
+            assert.equal(
+              car.lane,
+              lanes - 1,
+              `must eventually keep right: ${label}`,
+            );
+            assert.ok(
+              car.v * 3.6 > 85,
+              `did not accelerate toward 90: ${label}`,
+            );
+          }
+});
+test("a Regular held by the no-undertaking rule moves left in stages to pass legally", () => {
+  for (const lanes of [3, 5])
+    for (const slowLane of new Set([1, lanes - 2])) {
+      const { sim, car, slow } = completePassScenario({
+        lanes,
+        lane: lanes - 1,
+        slowLane,
+        speed: 90,
+        gap: 40,
+      });
+      let passed = false;
+      for (let step = 0; step < 1200; step++) {
+        const changes = sim.changes;
+        sim.step();
+        if (!passed && mod(car.q - slow.q + 0.5) - 0.5 > 0) {
+          assert.ok(
+            car.lane < slowLane,
+            "the pass must happen to the Slowpoke's left",
+          );
+          passed = true;
+        }
+        if (sim.changes > changes && car.target > car.from)
+          assert.ok(passed, "do not undo the leftward approach before passing");
+        checkSafe(sim);
+      }
+      assert.ok(passed, `${lanes} lanes, Slowpoke in lane ${slowLane + 1}`);
+      assert.equal(car.lane, lanes - 1);
+      assert.ok(car.v * 3.6 > 85);
+    }
 });
 function passingScenario(type, followerSpeed, leaderSpeed) {
   const sim = new Simulation(

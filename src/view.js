@@ -270,16 +270,7 @@ export class RoadView {
           ? car.lane
           : car.from + (car.target - car.from) * smooth;
       const p = this.point(car.q, lane, sim);
-      const neighbors = sim.neighbors(car, car.lane);
-      const spacing = Math.min(neighbors.gap, neighbors.backGap) + 4.5;
-      const pixelsPerMeter =
-        sim.config.layout === "circle"
-          ? (2 * Math.PI * g.radius(lane)) / sim.laneLength(car.lane)
-          : (sim.route.total * g.scale) / sim.laneLength(car.lane);
-      const len = Math.min(
-        clamp(laneWidth * 1.15, 14, 32),
-        Math.max(5, spacing * pixelsPerMeter * 0.82),
-      );
+      const len = clamp(laneWidth * 1.15, 14, 32);
       const wid = Math.min(laneWidth * 0.55, len * 0.5);
       this.hits.push({
         ...p,
