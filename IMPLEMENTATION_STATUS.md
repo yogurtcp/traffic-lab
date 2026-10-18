@@ -2,7 +2,9 @@
 
 ## Automated model checks
 
-`npm test`: 14 passing tests. Covers evenly spaced starts, seeded reproducibility, the leftmost slowpoke, lap geometry and speed units, recovery to all eight desired speeds without overshooting, smooth homogeneous flow across unequal lap lengths, reaction delay against an unbraked control, temporary braking versus persistent breakdown, repairs, obstacle rejection/removal, passing rules on both sides and across nonadjacent lanes, front/rear merge gaps, dense traffic with maximum reaction delay, queue separation, and a brake-induced traffic wave.
+`npm test`: 17 passing tests. Covers evenly spaced starts, seeded reproducibility, the leftmost slowpoke, lap geometry and speed units, recovery to all eight desired speeds without overshooting, smooth homogeneous flow across unequal lap lengths, reaction delay against an unbraked control, temporary braking versus persistent breakdown, repairs, obstacle rejection/removal, passing rules on both sides and across nonadjacent lanes, front/rear merge gaps, dense traffic with maximum reaction delay, queue separation, and a brake-induced traffic wave.
+
+The slowpoke passing regression was reproduced before the fix: a slowpoke doing 70 km/h chose to pass a leader also doing 70, and a driver chose a safe passing lane even when its traffic was slower. Three regression tests now cover refusing equal-speed/faster leaders (including a 60 km/h follower behind a 65 km/h leader), preserving useful passes after following a genuinely slower car, and rejecting a passing lane without a speed advantage. Passing decisions continue to use delayed traffic perception; obstacle avoidance remains exempt from the discretionary speed-gain requirement.
 
 Stress cases ran for 30 simulated seconds each on 1, 3, and 5 lanes with a short road, mixed traffic, two-second delay, and incidents. These checks confirm finite nonnegative speeds, wrapped positions, and at least 0.49 m clearance in every occupied lane. Additional 100-second preset runs exercised sustained flow and incident recovery. Perfect flow was checked for 60 seconds: no cars below 30 km/h and no lane changes.
 

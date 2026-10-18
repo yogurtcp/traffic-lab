@@ -146,6 +146,72 @@ test("regular and speedster overtake slow traffic to the left; stuntmen also use
     assert.equal(c.target, type === "stuntman" ? 1 : null);
   }
 });
+function passingScenario(type, followerSpeed, leaderSpeed) {
+  const sim = new Simulation(
+    config(
+      { [type]: 1, regular: type === "regular" ? 2 : 1 },
+      { lanes: 2, reaction: 0 },
+    ),
+  );
+  const car = sim.cars.find((c) => c.type === type);
+  const lead = sim.cars.find((c) => c.id !== car.id);
+  Object.assign(car, {
+    lane: 1,
+    from: 1,
+    q: 0,
+    v: followerSpeed / 3.6,
+    cooldown: 0,
+  });
+  Object.assign(lead, {
+    lane: 1,
+    from: 1,
+    q: 0.035,
+    v: leaderSpeed / 3.6,
+    cooldown: 100,
+  });
+  return { sim, car, lead };
+}
+test("slowpokes do not attempt to pass equal-speed or faster moving leaders", () => {
+  for (const [followerSpeed, leaderSpeed] of [
+    [70, 70],
+    [70, 70.4],
+    [60, 65],
+  ]) {
+    const { sim, car } = passingScenario(
+      "slowpoke",
+      followerSpeed,
+      leaderSpeed,
+    );
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(
+      car.target,
+      null,
+      `${followerSpeed} km/h behind ${leaderSpeed} km/h`,
+    );
+  }
+});
+test("a slowpoke can still pass genuinely slower traffic, including after matching its speed", () => {
+  for (const followerSpeed of [70, 50]) {
+    const { sim, car } = passingScenario("slowpoke", followerSpeed, 50);
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(car.target, 0);
+  }
+});
+test("a passing lane must offer a useful speed advantage", () => {
+  const { sim, car } = passingScenario("regular", 90, 65);
+  const leftLeader = {
+    ...sim.cars.find((c) => c.id !== car.id),
+    id: 999,
+    lane: 0,
+    from: 0,
+    q: 0.06,
+    v: 60 / 3.6,
+  };
+  sim.cars.push(leftLeader);
+  assert.equal(sim.safeLane(car, 0), true);
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, null);
+});
 test("a lane change requires space both in front and behind", () => {
   const sim = new Simulation(
     config({ regular: 1, slowpoke: 2 }, { lanes: 2, reaction: 0 }),

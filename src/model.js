@@ -353,10 +353,19 @@ export class Simulation {
       return;
     const old = delayed.cars.find((c) => c.id === car.id) ?? car;
     const { front, gap } = this.neighbors(old, car.lane, delayed);
+    const desiredSpeed = PERSONALITIES[car.type].speed / 3.6;
+    const passMargin = 2 / 3.6;
+    const lookAhead = Math.max(55, old.v * 3.5);
+    const obstruction = front && (front.obstacle || front.broken);
+    // Being near a car doing 70 does not itself justify passing: the driver
+    // must be held below their own desired speed, and not be falling behind.
     const blocked =
       front &&
-      gap < Math.max(55, car.v * 3.5) &&
-      (front.obstacle || front.v * 3.6 <= 70.5);
+      gap < lookAhead &&
+      (obstruction ||
+        (front.v * 3.6 <= 70.5 &&
+          front.v + passMargin < desiredSpeed &&
+          front.v <= old.v + 0.05));
     let choices = [];
     if (car.type === "hog") {
       if (car.lane > 0) choices = [car.lane - 1];
@@ -374,7 +383,17 @@ export class Simulation {
         .sort((a, b) => b.score - a.score)
         .map((x) => x.l);
     } else {
-      if (blocked) choices.push(car.lane - 1);
+      if (blocked && car.lane > 0) {
+        const left = this.neighbors(old, car.lane - 1, delayed);
+        // A safe gap can still lead straight into slower traffic. Only make
+        // a discretionary pass if the destination lane offers a useful pace.
+        const leftPace =
+          left.front && left.gap < Math.max(80, desiredSpeed * 6)
+            ? Math.min(desiredSpeed, left.front.v)
+            : desiredSpeed;
+        if (obstruction || leftPace > front.v + passMargin)
+          choices.push(car.lane - 1);
+      }
       // Moving right to escape a stationary obstacle is permitted. Passing
       // moving traffic on the right is not; acceleration also enforces that.
       if ((front?.obstacle || front?.broken) && blocked)

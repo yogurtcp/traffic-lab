@@ -39,6 +39,8 @@ Presets: **Mixed company**, **Perfect flow**, **Phantom jam**, and **Left-lane b
 
 The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it. All drivers use the same selected perception delay. Passing moving traffic on the right is prevented for everyone except Stuntman, including across nonadjacent lanes. Stationary obstacles and broken vehicles can be avoided on either side.
 
+Ordinary passing requires traffic ahead to be at least 2 km/h below the driver's desired speed and not pulling away. The passing lane must also offer more than 2 km/h of speed advantage over that traffic. A slowpoke therefore follows another car doing 70 km/h instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
+
 ## What to watch
 
 - Average speed, cars below 30 km/h, lane changes, and speed as a percentage of the mix's desired speed.
