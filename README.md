@@ -41,6 +41,8 @@ The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it.
 
 Ordinary passing requires traffic ahead to be at least 2 km/h below the driver's desired speed and not pulling away. The passing lane must also offer more than 2 km/h of speed advantage over that traffic. A slowpoke therefore follows another car doing 70 km/h instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
 
+Before moving left, ordinary drivers also check the effect on the car behind in the destination lane. They allow for the gap closing during the shared reaction delay and 1.6-second lane change, then use that follower's own car-following rule to estimate braking. They wait if the predicted braking would exceed 1.5 m/s² (or the follower's comfortable braking setting, if lower). A faster car approaching from behind therefore needs more room, and the driver can merge after it passes. Stuntmen skip this courtesy check.
+
 ## What to watch
 
 - Average speed, cars below 30 km/h, lane changes, and speed as a percentage of the mix's desired speed.

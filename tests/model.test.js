@@ -255,6 +255,72 @@ function stuntScenario(frontDistance = 14, frontSpeed = 20) {
   sim.history = Array.from({ length: 43 }, () => sim.snapshot());
   return { sim, stunt, rear, targetLeader };
 }
+function leftMergeScenario(rearSpeed = 90, rearGap = 30, reaction = 0.9) {
+  const sim = new Simulation(
+    config({ regular: 1, slowpoke: 1, speedster: 1 }, { lanes: 2, reaction }),
+  );
+  const car = sim.cars.find((c) => c.type === "regular");
+  const lead = sim.cars.find((c) => c.type === "slowpoke");
+  const rear = sim.cars.find((c) => c.type === "speedster");
+  Object.assign(car, { lane: 1, from: 1, q: 0.2, v: 25, cooldown: 0 });
+  Object.assign(lead, {
+    lane: 1,
+    from: 1,
+    q: 0.235,
+    v: 70 / 3.6,
+    cooldown: 100,
+  });
+  Object.assign(rear, {
+    lane: 0,
+    from: 0,
+    q: 0.2 - (rearGap + CAR_LENGTH) / sim.laneLength(0),
+    v: rearSpeed / 3.6,
+    cooldown: 100,
+  });
+  rear.type = rearSpeed > 90 ? "speedster" : "regular";
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  return { sim, car, rear };
+}
+test("regulars reject a left merge that would force sharp braking despite physical clearance", () => {
+  for (const [rearSpeed, rearGap] of [
+    [90, 30],
+    [110, 60],
+  ]) {
+    const { sim, car } = leftMergeScenario(rearSpeed, rearGap);
+    assert.equal(sim.safeLane(car, 0), false);
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(car.target, null);
+  }
+});
+test("regular left merges allow for closing during reaction time and lane-change duration", () => {
+  const instant = leftMergeScenario(110, 100, 0);
+  assert.equal(instant.sim.safeLane(instant.car, 0), true);
+  const { sim, car } = leftMergeScenario(110, 100, 2);
+  assert.equal(sim.safeLane(car, 0), false);
+});
+test("regulars wait for an approaching car to pass before moving left", () => {
+  const { sim, car, rear } = leftMergeScenario(110, 60);
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, null);
+  rear.q = car.q + 0.05;
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+});
+test("a considerate left merge with enough room avoids a braking shock for the follower", () => {
+  const { sim, car, rear } = leftMergeScenario(110, 200);
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+  let hardest = 0;
+  for (let i = 0; i < 80; i++) {
+    sim.step();
+    hardest = Math.min(hardest, rear.a);
+    checkSafe(sim);
+  }
+  assert.ok(
+    hardest >= -1.5,
+    `following driver had to brake at ${hardest} m/s²`,
+  );
+});
 test("stuntmen take tight gaps that regular drivers reject, even when both lanes require braking", () => {
   const { sim, stunt } = stuntScenario();
   assert.equal(sim.safeLane(stunt, 1), true);
