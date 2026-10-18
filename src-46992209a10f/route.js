@@ -1,6 +1,12 @@
 const tau = Math.PI * 2;
 const wrap = (v) => ((v % 1) + 1) % 1;
 const cache = new Map();
+export const FIGURE8_GEOMETRY = {
+  arm: 2.1,
+  core: 0.3,
+  edge: 0.65,
+  bendRadius: 0.8,
+};
 
 // One continuous reference path. The four-lobed layout visits a four-arm
 // crossing from west, south, east, and north, in that order each lap.
@@ -54,9 +60,7 @@ export function getRoute(layout = "circle", intersection = "stop") {
     arc(x - r, -y + r, r, 0, -Math.PI / 2);
     line(0, -y);
   } else if (layout === "figure8") {
-    const arm = 0.55,
-      core = 0.17,
-      edge = 0.29;
+    const { arm, core, edge, bendRadius } = FIGURE8_GEOMETRY;
     const rotated = (x, y, i) => ({
       x: x * Math.cos((-i * Math.PI) / 2) - y * Math.sin((-i * Math.PI) / 2),
       y: x * Math.sin((-i * Math.PI) / 2) + y * Math.cos((-i * Math.PI) / 2),
@@ -73,7 +77,7 @@ export function getRoute(layout = "circle", intersection = "stop") {
         const diag = core / Math.sqrt(2);
         curve(
           rotated(-core + 0.005, 0, i),
-          rotated(-diag - 0.055, diag - 0.055, i),
+          rotated(-diag - core * 0.32, diag - core * 0.32, i),
           rotated(-diag, diag, i),
         );
         for (let j = 1; j <= 48; j++) {
@@ -82,7 +86,7 @@ export function getRoute(layout = "circle", intersection = "stop") {
           add(p.x, p.y);
         }
         curve(
-          rotated(diag + 0.055, diag - 0.055, i),
+          rotated(diag + core * 0.32, diag - core * 0.32, i),
           rotated(core - 0.005, 0, i),
           rotated(edge, 0, i),
         );
@@ -94,12 +98,25 @@ export function getRoute(layout = "circle", intersection = "stop") {
         axis: i % 2,
       });
       rline(arm, 0, i);
-      // Bulging outer connections keep the four arms joined with smooth ends.
-      curve(
-        rotated(1.23, 0, i),
-        rotated(0, 1.23, i),
-        rotated(-arm, 0, (i + 1) % 4),
+      // Two constant-radius bends joined by a diagonal keep the long arms
+      // smooth. Unlike a single cubic, these cannot pinch at the outer tips
+      // when the inside lanes are widened.
+      const turn = (-i * Math.PI) / 2;
+      const first = rotated(arm, bendRadius, i);
+      arc(
+        first.x,
+        first.y,
+        bendRadius,
+        -Math.PI / 2 + turn,
+        Math.PI / 4 + turn,
       );
+      rline(
+        bendRadius * (1 + Math.SQRT1_2),
+        arm + bendRadius * Math.SQRT1_2,
+        i,
+      );
+      const second = rotated(bendRadius, arm, i);
+      arc(second.x, second.y, bendRadius, Math.PI / 4 + turn, Math.PI + turn);
     }
   } else {
     for (let i = 0; i <= 512; i++) {

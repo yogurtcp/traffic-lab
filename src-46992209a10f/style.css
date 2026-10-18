@@ -440,7 +440,7 @@ input[type="range"] {
   background-position: right 5px center;
 }
 .road-view {
-  height: 510px;
+  height: 680px;
   background: #edf0e4;
   position: relative;
   overflow: hidden;
@@ -928,7 +928,7 @@ dialog a {
 }
 @media (min-width: 1450px) {
   .road-view {
-    height: 555px;
+    height: 760px;
   }
 }
 @media (max-width: 1100px) {
@@ -944,7 +944,7 @@ dialog a {
     padding: 20px 16px;
   }
   .road-view {
-    height: 480px;
+    height: 620px;
   }
   .top-caption {
     display: none;
@@ -1079,7 +1079,7 @@ dialog a {
     min-height: 0;
   }
   .road-view {
-    height: 470px;
+    height: 560px;
   }
   .transport {
     padding: 14px;
@@ -1246,7 +1246,7 @@ dialog a {
     width: 24px;
   }
   .road-view {
-    height: 430px;
+    height: 500px;
   }
   .keyboard-hint {
     display: none;
