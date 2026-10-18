@@ -668,7 +668,7 @@ kbd {
 }
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: 18px 0;
   gap: 9px;
 }
@@ -1099,6 +1099,7 @@ dialog a {
     font-size: 9px;
   }
   .stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     margin: 12px 0;
   }
@@ -1190,6 +1191,35 @@ dialog a {
   .details summary span {
     font-size: 7px;
   }
+}
+.layout-settings .field-label {
+  margin-top: 14px;
+}
+.layout-settings .small-copy {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.layout-settings select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.throughput-stat {
+  background: #edf3e4;
+  border-color: #d4dfc6;
+}
+.throughput-stat em {
+  line-height: 1.4;
+}
+.junction-status {
+  padding: 10px 20px;
+  background: #e8eddc;
+  border-top: 1px solid #d2dbc6;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5e7550;
+}
+.road-view[data-layout="figure8"] .center-readout {
+  display: none;
 }
 @media (max-width: 400px) {
   .beta {
