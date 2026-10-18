@@ -1,6 +1,7 @@
 export const STEP = 0.05;
 export const CAR_LENGTH = 4.5;
 export const LANE_WIDTH = 3.7;
+const LANE_CHANGE_TIME = 1.6;
 export const PERSONALITIES = {
   regular: {
     name: "Regular",
@@ -10,7 +11,7 @@ export const PERSONALITIES = {
     accel: 1.5,
     brake: 2.5,
     description:
-      "90 km/h. Passes vehicles at 70 km/h or below, on the left. Keeps right when clear.",
+      "90 km/h. Passes traffic at 70 km/h or below on the left. Waits to avoid forcing others to brake sharply; keeps right when clear.",
   },
   slowpoke: {
     name: "Slowpoke",
@@ -315,9 +316,8 @@ export class Simulation {
     if (state !== this) this.queueCache.set(state, queues);
     return queues;
   }
-  acceleration(car, lane, state) {
+  followingAcceleration(car, front, gap) {
     const p = PERSONALITIES[car.type];
-    const { front, gap } = this.neighbors(car, lane, state);
     const closing = car.v - (front?.v ?? car.v);
     const desiredGap =
       2 +
@@ -325,11 +325,19 @@ export class Simulation {
         0,
         car.v * p.gap + (car.v * closing) / (2 * Math.sqrt(p.accel * p.brake)),
       );
-    let acceleration =
+    return clamp(
       p.accel *
-      (1 -
-        (car.v / (p.speed / 3.6)) ** 4 -
-        (desiredGap / Math.max(0.2, gap)) ** 2);
+        (1 -
+          (car.v / (p.speed / 3.6)) ** 4 -
+          (desiredGap / Math.max(0.2, gap)) ** 2),
+      -8,
+      p.accel,
+    );
+  }
+  acceleration(car, lane, state) {
+    const p = PERSONALITIES[car.type];
+    const { front, gap } = this.neighbors(car, lane, state);
+    let acceleration = this.followingAcceleration(car, front, gap);
     // Right-hand traffic: inner lane is left. Law-abiding drivers cannot
     // advance past a slower car immediately to their left, even without merging.
     if (car.type !== "stuntman" && lane > 0) {
@@ -385,6 +393,24 @@ export class Simulation {
       );
     }
     const multiplier = car.type === "cautious" ? 1.3 : 0.85;
+    if (rear && lane < car.lane) {
+      // A physically clear gap can still force a faster follower to brake.
+      // Check the follower's own model after allowing for gap closure during
+      // its reaction delay and our lane change. Inner laps are shorter, so
+      // convert our initial angular progress to the destination lane's pace.
+      const mergeSpeed =
+        (car.v * this.laneLength(lane)) / this.laneLength(car.lane);
+      const closing = Math.max(0, rear.v - mergeSpeed);
+      const projectedGap =
+        backGap - closing * (this.config.reaction + LANE_CHANGE_TIME);
+      const comfortableBrake = Math.min(1.5, PERSONALITIES[rear.type].brake);
+      if (
+        projectedGap <= 0 ||
+        this.followingAcceleration(rear, { v: mergeSpeed }, projectedGap) <
+          -comfortableBrake
+      )
+        return false;
+    }
     return (
       gap >
         Math.max(
@@ -600,7 +626,7 @@ export class Simulation {
       car.q = mod(car.q + move.advance);
       car.v = move.v;
       if (car.target !== null) {
-        car.blend = Math.min(1, car.blend + dt / 1.6);
+        car.blend = Math.min(1, car.blend + dt / LANE_CHANGE_TIME);
         if (car.blend >= 1) {
           car.lane = car.target;
           car.target = null;
