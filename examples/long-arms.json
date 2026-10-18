@@ -1,0 +1,23 @@
+{
+  "title": "Long approaches · regulars, slowpokes, and stuntmen",
+  "preset": "mixed",
+  "config": {
+    "layout": "figure8",
+    "intersection": "lights",
+    "lanes": 2,
+    "length": 1000,
+    "reaction": 0.9,
+    "seed": 42,
+    "counts": { "regular": 12, "slowpoke": 2, "stuntman": 3 }
+  },
+  "duration": 180,
+  "speed": 6,
+  "fps": 30,
+  "width": 1440,
+  "height": 1080,
+  "events": [
+    { "at": 30, "type": "brake", "car": 1, "duration": 3 },
+    { "at": 75, "type": "breakdown", "car": 9 },
+    { "at": 105, "type": "repair", "car": 9 }
+  ]
+}

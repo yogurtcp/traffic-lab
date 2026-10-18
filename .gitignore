@@ -2,3 +2,5 @@ dist/
 node_modules/
 artifacts/*.png
 artifacts/*.webm
+videos/
+artifacts/*.mp4

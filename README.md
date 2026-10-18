@@ -12,6 +12,14 @@ npm start
 
 Open **http://localhost:4180**. Node 18+ is sufficient; no dependency installation is required. `PORT=4181 npm start` selects another port.
 
+To export simulation videos, run `npm ci` once, then:
+
+```sh
+npm run simulate -- --scenario examples/long-arms.json --output videos/demo.mp4
+```
+
+This creates a 30-second MP4 showing three simulated minutes at 6× speed, plus a JSON statistics report and PNG preview. Customize the road, exact driver counts, speed, seed, and timed interventions through flags or a scenario file. See [simulation CLI documentation](SIMULATIONS.md).
+
 ## Make an experiment
 
 1. Choose a circle, rounded rectangle, or four-arm figure-eight; then choose 1–5 lanes, a 600–2,000 m base lap, and a shared 0–2 second reaction time. On the figure-eight, choose the central intersection rule.
@@ -27,6 +35,8 @@ Presets: **Mixed company**, **Perfect flow**, **Phantom jam**, **Left-lane block
 ## Layouts and junctions
 
 Circle and rounded rectangle are uninterrupted loops. The four-arm figure-eight joins four approaches with smooth outer connections and revisits the central junction four times per full lap. Lane 1 is always the leftmost lane in the direction of travel; the junction approaches have separate incoming and outgoing carriageways.
+
+The four-arm layout has extended straight approaches and generous constant-radius outer turns. A taller viewport, wider lanes, and enlarged car sprites make the road easier to read. Sprite sizes adapt to local spacing to keep queued cars distinct.
 
 | Control        | Behavior                                                                                                                                                                                                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -95,4 +105,7 @@ Deployment requires Git and authenticated GitHub CLI. Push source to `main`, the
 - `src/style.css` — responsive interface.
 - `tests/model.test.js` — model regression checks using Node's built-in test runner.
 - `tests/routes.test.js` — geometry, pointer placement, full-lap throughput, and intersection behavior/conflict checks.
-- `scripts/` — standalone static build and GitHub Pages deployment.
+- `tests/cli.test.js` — scenario validation, deterministic interventions, metrics, and CLI output protection.
+- `scripts/simulate.mjs`, `scripts/lib/` — command-line experiments and MP4/JSON/PNG export.
+- `examples/long-arms.json` — reproducible three-minute video scenario.
+- `scripts/build.mjs`, `scripts/deploy.mjs` — standalone static build and GitHub Pages deployment.

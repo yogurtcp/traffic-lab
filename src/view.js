@@ -1,4 +1,5 @@
 import { PERSONALITIES, clamp, mod } from "./model.js";
+import { FIGURE8_GEOMETRY } from "./route.js";
 export function speedColor(speed) {
   const a =
     speed < 45 ? [219, 106, 85] : speed < 75 ? [224, 179, 88] : [106, 166, 124];
@@ -6,7 +7,7 @@ export function speedColor(speed) {
 }
 function fit(canvas) {
   const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(globalThis.window?.devicePixelRatio || 1, 2);
   const w = Math.max(1, rect.width),
     h = Math.max(1, rect.height);
   if (
@@ -29,17 +30,22 @@ export class RoadView {
   geometry(sim) {
     const { width: w, height: h } = this.canvas.getBoundingClientRect();
     if (sim.config.layout !== "circle") {
-      const laneWidth =
-        sim.config.layout === "figure8"
-          ? clamp(Math.min(w, h) / (sim.config.lanes * 10 + 35), 5, 12)
-          : clamp(Math.min(w, h) * 0.035, 10, 18);
       const maxX = Math.max(...sim.route.points.map((p) => Math.abs(p.x))),
         maxY = Math.max(...sim.route.points.map((p) => Math.abs(p.y)));
+      const desiredLaneWidth = clamp(Math.min(w, h) * 0.044, 16, 28);
+      // Keep enlarged roads clear of the junction stop lines, even with five
+      // lanes on a narrow display. Larger viewports retain the full width.
+      const fitLaneWidth =
+        sim.config.layout === "figure8"
+          ? (0.86 * FIGURE8_GEOMETRY.edge * Math.min(w / 2 - 24, h / 2 - 36)) /
+            (sim.config.lanes * (Math.max(maxX, maxY) + FIGURE8_GEOMETRY.edge))
+          : (Math.min(w, h) * 0.18) / sim.config.lanes;
+      const laneWidth = Math.min(desiredLaneWidth, Math.max(3, fitLaneWidth));
       const scale = Math.max(
         20,
         Math.min(
           (w / 2 - 24 - laneWidth * sim.config.lanes) / maxX,
-          (h / 2 - 45 - laneWidth * sim.config.lanes) / maxY,
+          (h / 2 - 36 - laneWidth * sim.config.lanes) / maxY,
         ),
       );
       const inner = Math.min(maxX, maxY) * scale - 12;
@@ -57,7 +63,10 @@ export class RoadView {
       };
     }
     const outer = Math.min(w * 0.445, h * 0.432);
-    const laneWidth = clamp(outer * 0.078, 12, 19);
+    const laneWidth = Math.min(
+      clamp(outer * 0.105, 16, 28),
+      (outer * 0.58) / sim.config.lanes,
+    );
     const inner = outer - laneWidth * sim.config.lanes;
     return {
       w,
@@ -130,7 +139,7 @@ export class RoadView {
   hit(x, y) {
     return this.hits
       .map((h) => ({ ...h, distance: Math.hypot(h.x - x, h.y - y) }))
-      .filter((h) => h.distance < 14)
+      .filter((h) => h.distance < (h.radius ?? 14))
       .sort((a, b) => a.distance - b.distance)[0];
   }
   draw(sim, selected, speedOverlay = false) {
@@ -143,15 +152,15 @@ export class RoadView {
     const tree = (x, y, r) => {
       ctx.fillStyle = "#d6dfc9";
       ctx.beginPath();
-      ctx.arc(x + 2, y + 3, r, 0, 7);
+      ctx.arc(x + 2, y + 3, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#c5d4b6";
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, 7);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ccd9be";
       ctx.beginPath();
-      ctx.arc(x - r / 4, y - r / 4, r * 0.66, 0, 7);
+      ctx.arc(x - r / 4, y - r / 4, r * 0.66, 0, Math.PI * 2);
       ctx.fill();
     };
     [
@@ -170,24 +179,24 @@ export class RoadView {
       ctx.lineWidth = 5;
       ctx.strokeStyle = "#c7d3b8";
       ctx.beginPath();
-      ctx.arc(cx, cy, outer + 6, 0, 7);
+      ctx.arc(cx, cy, outer + 6, 0, Math.PI * 2);
       ctx.stroke();
       ctx.lineWidth = 4;
       ctx.strokeStyle = "#d6e0c9";
       ctx.beginPath();
-      ctx.arc(cx, cy, inner - 7, 0, 7);
+      ctx.arc(cx, cy, inner - 7, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = "#343f3c";
       ctx.beginPath();
-      ctx.arc(cx, cy, outer, 0, 7);
-      ctx.arc(cx, cy, inner, 0, 7, true);
+      ctx.arc(cx, cy, outer, 0, Math.PI * 2);
+      ctx.arc(cx, cy, inner, 0, Math.PI * 2, true);
       ctx.fill("evenodd");
       for (let l = 1; l < sim.config.lanes; l++) {
         ctx.setLineDash([6, 9]);
         ctx.lineWidth = 0.8;
         ctx.strokeStyle = "#8a979079";
         ctx.beginPath();
-        ctx.arc(cx, cy, inner + l * laneWidth, 0, 7);
+        ctx.arc(cx, cy, inner + l * laneWidth, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.setLineDash([]);
@@ -195,7 +204,7 @@ export class RoadView {
       ctx.strokeStyle = "#b0bba17d";
       for (const r of [inner + 2, outer - 2]) {
         ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, 7);
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.stroke();
       }
       // A fixed measuring gate makes completed laps and travel direction legible.
@@ -261,9 +270,23 @@ export class RoadView {
           ? car.lane
           : car.from + (car.target - car.from) * smooth;
       const p = this.point(car.q, lane, sim);
-      this.hits.push({ ...p, id: car.id, obstacle: false });
-      const len = clamp(CAR_LENGTH_PIXELS(sim, car, g), 8, 12),
-        wid = laneWidth * 0.43;
+      const neighbors = sim.neighbors(car, car.lane);
+      const spacing = Math.min(neighbors.gap, neighbors.backGap) + 4.5;
+      const pixelsPerMeter =
+        sim.config.layout === "circle"
+          ? (2 * Math.PI * g.radius(lane)) / sim.laneLength(car.lane)
+          : (sim.route.total * g.scale) / sim.laneLength(car.lane);
+      const len = Math.min(
+        clamp(laneWidth * 1.15, 14, 32),
+        Math.max(5, spacing * pixelsPerMeter * 0.82),
+      );
+      const wid = Math.min(laneWidth * 0.55, len * 0.5);
+      this.hits.push({
+        ...p,
+        id: car.id,
+        obstacle: false,
+        radius: Math.max(14, len * 0.7),
+      });
       if (car.v * 3.6 < 30) {
         ctx.strokeStyle = `rgba(224,112,85,${0.15 + (30 - car.v * 3.6) / 110})`;
         ctx.lineWidth = laneWidth * 0.75;
@@ -296,13 +319,18 @@ export class RoadView {
       ctx.beginPath();
       ctx.roundRect(-len / 2 + 0.6, -wid / 2 + 1.2, len, wid, 1.8);
       ctx.fill();
+      ctx.fillStyle = "#1d2927";
+      for (const x of [-len * 0.3, len * 0.25]) {
+        ctx.fillRect(x - len * 0.08, -wid * 0.62, len * 0.18, wid * 0.2);
+        ctx.fillRect(x - len * 0.08, wid * 0.42, len * 0.18, wid * 0.2);
+      }
       ctx.fillStyle = car.broken
         ? "#6b716b"
         : speedOverlay
           ? speedColor(car.v * 3.6)
           : PERSONALITIES[car.type].color;
       ctx.beginPath();
-      ctx.roundRect(-len / 2, -wid / 2, len, wid, 1.8);
+      ctx.roundRect(-len / 2, -wid / 2, len, wid, Math.min(3, wid * 0.3));
       ctx.fill();
       ctx.fillStyle = "#e9efdbb5";
       ctx.fillRect(len * 0.07, -wid * 0.33, len * 0.2, wid * 0.66);
@@ -392,7 +420,7 @@ export class RoadView {
     }
     ctx.setLineDash([]);
     if (sim.config.layout === "figure8") {
-      const core = 0.17 * g.scale;
+      const core = FIGURE8_GEOMETRY.core * g.scale;
       if (sim.config.intersection === "roundabout") {
         ctx.strokeStyle = "#343f3c";
         ctx.lineWidth = g.laneWidth * sim.config.lanes + 2;
@@ -421,10 +449,26 @@ export class RoadView {
         ctx.arc(g.cx, g.cy, core - 2, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = "#79916a";
-        ctx.textAlign = "center";
-        ctx.font = "18px sans-serif";
-        ctx.fillText("↶", g.cx, g.cy + 6);
+        ctx.strokeStyle = ctx.fillStyle = "#79916a";
+        ctx.lineWidth = 2;
+        const arrowRadius = core * 0.4,
+          endAngle = -Math.PI * 1.3;
+        ctx.beginPath();
+        ctx.arc(g.cx, g.cy, arrowRadius, 0.4, endAngle, true);
+        ctx.stroke();
+        ctx.save();
+        ctx.translate(
+          g.cx + Math.cos(endAngle) * arrowRadius,
+          g.cy + Math.sin(endAngle) * arrowRadius,
+        );
+        ctx.rotate(endAngle - Math.PI / 2);
+        ctx.beginPath();
+        ctx.moveTo(4, 0);
+        ctx.lineTo(-3, -3);
+        ctx.lineTo(-3, 3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       } else {
         ctx.fillStyle = "#343f3c";
         const half = Math.max(core, g.laneWidth * sim.config.lanes + 1);
@@ -513,13 +557,6 @@ export class RoadView {
     ctx.lineTo(gateB.x, gateB.y);
     ctx.stroke();
   }
-}
-function CAR_LENGTH_PIXELS(sim, car, g) {
-  if (sim.config.layout !== "circle")
-    return ((4.5 * g.scale * sim.route.total) / sim.laneLength(car.lane)) * 1.1;
-  return (
-    ((4.5 * 2 * Math.PI * g.radius(car.lane)) / sim.laneLength(car.lane)) * 1.35
-  );
 }
 export function drawCharts(speedCanvas, waveCanvas, sim) {
   const { ctx, w, h } = fit(speedCanvas);
