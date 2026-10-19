@@ -1,5 +1,6 @@
 import { PERSONALITIES, clamp, mod } from "./model.js";
 import { FIGURE8_GEOMETRY } from "./route.js";
+import { U_BEND_RADIUS } from "./open-route.js";
 export function speedColor(speed) {
   const a =
     speed < 45 ? [219, 106, 85] : speed < 75 ? [224, 179, 88] : [106, 166, 124];
@@ -35,18 +36,18 @@ export class RoadView {
       const desiredLaneWidth = clamp(Math.min(w, h) * 0.044, 16, 28);
       // Keep enlarged roads clear of the junction stop lines, even with five
       // lanes on a narrow display. Larger viewports retain the full width.
-      const fitLaneWidth =
-        sim.config.layout === "figure8"
-          ? (0.86 * FIGURE8_GEOMETRY.edge * Math.min(w / 2 - 24, h / 2 - 36)) /
-            (sim.config.lanes * (Math.max(maxX, maxY) + FIGURE8_GEOMETRY.edge))
+      const fitLaneWidth = ["figure8", "cross"].includes(sim.config.layout)
+        ? (0.86 * FIGURE8_GEOMETRY.edge * Math.min(w / 2 - 24, h / 2 - 36)) /
+          (sim.config.lanes * (Math.max(maxX, maxY) + FIGURE8_GEOMETRY.edge))
+        : sim.config.layout === "u"
+          ? (0.8 * U_BEND_RADIUS * Math.min(w / 2 - 24, h / 2 - 36)) /
+            (sim.config.lanes * (Math.max(maxX, maxY) + U_BEND_RADIUS))
           : (Math.min(w, h) * 0.18) / sim.config.lanes;
       const laneWidth = Math.min(desiredLaneWidth, Math.max(3, fitLaneWidth));
+      const margin = sim.route.closed ? laneWidth * sim.config.lanes : 0;
       const scale = Math.max(
         20,
-        Math.min(
-          (w / 2 - 24 - laneWidth * sim.config.lanes) / maxX,
-          (h / 2 - 36 - laneWidth * sim.config.lanes) / maxY,
-        ),
+        Math.min((w / 2 - 24 - margin) / maxX, (h / 2 - 36 - margin) / maxY),
       );
       const inner = Math.min(maxX, maxY) * scale - 12;
       return {
@@ -80,14 +81,14 @@ export class RoadView {
       config: sim.config,
     };
   }
-  point(q, lane, sim) {
+  point(q, lane, sim, approach = 0) {
     const g =
       this.lastGeometry?.config === sim.config
         ? this.lastGeometry
         : this.geometry(sim);
     this.lastGeometry = g;
     if (sim.config.layout !== "circle") {
-      const p = sim.route.sample(q),
+      const p = sim.route.sample(q, approach),
         offset = (lane + 0.5) * g.laneWidth;
       return {
         x: g.cx + p.x * g.scale + p.nx * offset,
@@ -106,21 +107,34 @@ export class RoadView {
     const g = this.geometry(sim);
     this.lastGeometry = g;
     if (sim.config.layout !== "circle") {
+      if (
+        this.locationCache?.config !== sim.config ||
+        this.locationCache.w !== g.w ||
+        this.locationCache.h !== g.h
+      ) {
+        const points = [];
+        for (let approach = 0; approach < sim.route.approaches; approach++)
+          for (let lane = 0; lane < sim.config.lanes; lane++)
+            for (let i = 0; i < 1400; i++) {
+              const q = i / 1400,
+                p = this.point(q, lane, sim, approach);
+              points.push({ q, lane, approach, x: p.x, y: p.y });
+            }
+        this.locationCache = { config: sim.config, w: g.w, h: g.h, points };
+      }
       let best = null;
-      for (let lane = 0; lane < sim.config.lanes; lane++)
-        for (let i = 0; i < 1400; i++) {
-          const q = i / 1400,
-            p = this.point(q, lane, sim),
-            distance = Math.hypot(p.x - x, p.y - y);
-          if (
-            distance < g.laneWidth * 0.6 &&
-            (!best || distance < best.distance)
-          )
-            best = { q, lane, distance };
-        }
+      for (const p of this.locationCache.points) {
+        const distance = (p.x - x) ** 2 + (p.y - y) ** 2;
+        if (
+          distance < (g.laneWidth * 0.6) ** 2 &&
+          (!best || distance < best.distance)
+        )
+          best = { q: p.q, lane: p.lane, approach: p.approach, distance };
+      }
       // Keep the shared junction clear of user-placed obstructions. Incidents
       // can still be placed on every approach and outer connecting road.
       if (best && sim.route.inside(best.q)) return null;
+      if (best) best.distance = Math.sqrt(best.distance);
       return best;
     }
     const dx = x - g.cx,
@@ -242,7 +256,7 @@ export class RoadView {
       ctx.fillText("RIGHT / CRUISING", cx, cy + outer + 16);
     } else this.drawNetwork(ctx, sim, g);
     for (const o of sim.obstacles) {
-      const p = this.point(o.q, o.lane, sim);
+      const p = this.point(o.q, o.lane, sim, o.approach);
       this.hits.push({ ...p, id: o.id, obstacle: true });
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -269,7 +283,7 @@ export class RoadView {
         car.target === null
           ? car.lane
           : car.from + (car.target - car.from) * smooth;
-      const p = this.point(car.q, lane, sim);
+      const p = this.point(car.q, lane, sim, car.approach);
       const len = clamp(laneWidth * 1.15, 14, 32);
       const wid = Math.min(laneWidth * 0.55, len * 0.5);
       this.hits.push({
@@ -368,11 +382,14 @@ export class RoadView {
     const trace = (lane, skipCenter = false) => {
       if (!this.networkCache.paths.has(lane)) {
         const path = [];
-        for (let i = 0; i <= 1000; i++)
-          path.push({
-            ...this.point(i / 1000, lane, sim),
-            inside: !!sim.route.inside(i / 1000),
-          });
+        const samples = sim.route.closed ? 1000 : 300;
+        for (let approach = 0; approach < sim.route.approaches; approach++)
+          for (let i = 0; i <= samples; i++)
+            path.push({
+              ...this.point(i / samples, lane, sim, approach),
+              start: i === 0,
+              inside: !!sim.route.inside(i / samples),
+            });
         this.networkCache.paths.set(lane, path);
       }
       ctx.beginPath();
@@ -382,13 +399,13 @@ export class RoadView {
           fresh = true;
           continue;
         }
-        if (fresh) {
+        if (fresh || p.start) {
           ctx.moveTo(p.x, p.y);
           fresh = false;
         } else ctx.lineTo(p.x, p.y);
       }
     };
-    ctx.lineCap = "round";
+    ctx.lineCap = sim.route.closed ? "round" : "butt";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
     for (let lane = 0; lane < sim.config.lanes; lane++) {
@@ -410,7 +427,7 @@ export class RoadView {
       ctx.stroke();
     }
     ctx.setLineDash([]);
-    if (sim.config.layout === "figure8") {
+    if (["figure8", "cross"].includes(sim.config.layout)) {
       const core = FIGURE8_GEOMETRY.core * g.scale;
       if (sim.config.intersection === "roundabout") {
         ctx.strokeStyle = "#343f3c";
@@ -466,9 +483,14 @@ export class RoadView {
         ctx.fillRect(g.cx - half, g.cy - half, half * 2, half * 2);
       }
       for (const entry of sim.route.entries) {
-        const a = this.point(entry.q, -0.5, sim),
-          b = this.point(entry.q, sim.config.lanes - 0.5, sim),
-          sign = this.point(entry.q, sim.config.lanes + 0.7, sim);
+        const a = this.point(entry.q, -0.5, sim, entry.approach),
+          b = this.point(entry.q, sim.config.lanes - 0.5, sim, entry.approach),
+          sign = this.point(
+            entry.q,
+            sim.config.lanes + 0.7,
+            sim,
+            entry.approach,
+          );
         ctx.strokeStyle = "#eceddb";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -522,23 +544,25 @@ export class RoadView {
         }
       }
     }
-    for (let lane = 0; lane < sim.config.lanes; lane++)
-      for (let i = 0; i < 12; i++) {
-        const q = (i + 0.4) / 12;
-        if (sim.route.inside(q)) continue;
-        const p = this.point(q, lane, sim);
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.angle - Math.PI / 2);
-        ctx.strokeStyle = "#b8c5b34d";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(-3, -2);
-        ctx.lineTo(0, 0);
-        ctx.lineTo(-3, 2);
-        ctx.stroke();
-        ctx.restore();
-      }
+    for (let approach = 0; approach < sim.route.approaches; approach++)
+      for (let lane = 0; lane < sim.config.lanes; lane++)
+        for (const q of sim.route.closed
+          ? Array.from({ length: 12 }, (_, i) => (i + 0.4) / 12)
+          : [0.18, 0.82]) {
+          if (sim.route.inside(q)) continue;
+          const p = this.point(q, lane, sim, approach);
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.angle - Math.PI / 2);
+          ctx.strokeStyle = "#b8c5b34d";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(-3, -2);
+          ctx.lineTo(0, 0);
+          ctx.lineTo(-3, 2);
+          ctx.stroke();
+          ctx.restore();
+        }
     const gateA = this.point(0, -0.5, sim),
       gateB = this.point(0, sim.config.lanes - 0.5, sim);
     ctx.strokeStyle = "#e6efc47a";
@@ -547,6 +571,19 @@ export class RoadView {
     ctx.moveTo(gateA.x, gateA.y);
     ctx.lineTo(gateB.x, gateB.y);
     ctx.stroke();
+    if (!sim.route.closed) {
+      ctx.fillStyle = "#657a58";
+      ctx.font = "bold 9px sans-serif";
+      ctx.textAlign = "center";
+      for (let approach = 0; approach < sim.route.approaches; approach++)
+        for (const [q, text] of [
+          [0, "IN"],
+          [1, "OUT"],
+        ]) {
+          const p = this.point(q, sim.config.lanes + 0.6, sim, approach);
+          ctx.fillText(text, p.x, p.y + 3);
+        }
+    }
   }
 }
 export function drawCharts(speedCanvas, waveCanvas, sim) {

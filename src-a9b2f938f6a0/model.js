@@ -87,7 +87,42 @@ export const PERSONALITIES = {
   },
 };
 export const KEYS = Object.keys(PERSONALITIES);
+export const DEFAULT_PROBABILITIES = {
+  regular: 60,
+  slowpoke: 12,
+  hog: 4,
+  speedster: 10,
+  stuntman: 4,
+  cautious: 4,
+  tailgater: 3,
+  eco: 3,
+};
 export const PRESETS = {
+  stream: {
+    name: "Open-road traffic",
+    traffic: "stream",
+    layout: "u",
+    lanes: 2,
+    reaction: 0.9,
+    length: 1000,
+    seed: 42,
+    interval: 2,
+    probabilities: DEFAULT_PROBABILITIES,
+    counts: {},
+  },
+  crossing: {
+    name: "Four-way arrivals",
+    traffic: "stream",
+    layout: "cross",
+    intersection: "lights",
+    lanes: 2,
+    reaction: 0.9,
+    length: 1000,
+    seed: 42,
+    interval: 1.5,
+    probabilities: DEFAULT_PROBABILITIES,
+    counts: {},
+  },
   mixed: {
     name: "Mixed company",
     lanes: 3,
@@ -157,7 +192,27 @@ export function normalizeConfig(input = {}) {
     remaining -= counts[key];
   }
   return {
-    layout: ["circle", "rectangle", "figure8"].includes(input.layout)
+    traffic:
+      ["u", "cross"].includes(input.layout) || input.traffic === "stream"
+        ? "stream"
+        : "fixed",
+    interval: numeric(input.interval, 2, 0.2, 60),
+    probabilities: Object.fromEntries(
+      KEYS.map((k) => [
+        k,
+        numeric(
+          input.probabilities
+            ? (input.probabilities[k] ?? 0)
+            : DEFAULT_PROBABILITIES[k],
+          DEFAULT_PROBABILITIES[k],
+          0,
+          100,
+        ),
+      ]),
+    ),
+    layout: ["circle", "rectangle", "figure8", "u", "cross"].includes(
+      input.layout,
+    )
       ? input.layout
       : "circle",
     intersection: ["stop", "lights", "roundabout"].includes(input.intersection)
@@ -186,7 +241,16 @@ export class Simulation {
   laneLength(lane) {
     return (
       this.config.length +
-      (this.config.layout === "figure8" ? -6 : 2) * Math.PI * LANE_WIDTH * lane
+      (this.config.layout === "figure8"
+        ? -6
+        : this.config.layout === "u"
+          ? -1
+          : this.config.layout === "cross"
+            ? 0
+            : 2) *
+        Math.PI *
+        LANE_WIDTH *
+        lane
     );
   }
   occupied(car, lane) {
@@ -194,7 +258,12 @@ export class Simulation {
   }
   reset(config) {
     this.config = normalizeConfig(config);
-    this.route = getRoute(this.config.layout, this.config.intersection);
+    this.route = getRoute(
+      this.config.layout,
+      this.config.intersection,
+      this.config.length,
+    );
+    this.stream = this.config.traffic === "stream";
     this.junction = new Junction(this.route, this.config);
     this.time = 0;
     this.obstacles = [];
@@ -208,6 +277,27 @@ export class Simulation {
     this.samples = [];
     this.nextObstacle = 1;
     const random = rng(this.config.seed);
+    this.random = random;
+    this.nextCar = 1;
+    this.nextArrival = 0;
+    this.arrived = 0;
+    this.entered = 0;
+    this.exited = 0;
+    this.pending = Array.from({ length: this.route.approaches }, () => []);
+    this.fleetVersion = 0;
+    if (this.stream) {
+      const total = Object.values(this.config.probabilities).reduce(
+        (a, b) => a + b,
+        0,
+      );
+      if (Math.abs(total - 100) > 0.01)
+        throw new Error("Driver probabilities must add up to 100%.");
+      this.probabilityTotal = total;
+      this.cars = [];
+      this.history = Array.from({ length: 43 }, () => this.snapshot());
+      this.sample();
+      return;
+    }
     const types = KEYS.flatMap((type) =>
       Array(this.config.counts[type]).fill(type),
     );
@@ -292,12 +382,79 @@ export class Simulation {
         v: c.v,
         type: c.type,
         broken: c.broken,
+        approach: c.approach ?? 0,
       })),
       obstacles: this.obstacles.map((o) => ({ ...o })),
     };
   }
   forward(a, b, lane) {
-    return mod(b - a) * this.laneLength(lane);
+    return (this.route.closed ? mod(b - a) : b - a) * this.laneLength(lane);
+  }
+  sameRoad(a, b) {
+    return (
+      this.config.layout !== "cross" || (a.approach ?? 0) === (b.approach ?? 0)
+    );
+  }
+  inflow() {
+    while (this.nextArrival <= this.time + 1e-8) {
+      let draw = this.random() * this.probabilityTotal,
+        type = KEYS.findLast((k) => this.config.probabilities[k] > 0);
+      for (const key of KEYS) {
+        draw -= this.config.probabilities[key];
+        if (draw < 0) {
+          type = key;
+          break;
+        }
+      }
+      const approach = Math.floor(this.random() * this.route.approaches);
+      this.pending[approach].push({ id: this.nextCar++, type, approach });
+      this.arrived++;
+      this.nextArrival += this.config.interval;
+    }
+    for (const queue of this.pending) {
+      if (!queue.length || this.cars.length >= 180) continue;
+      const arrival = queue[0],
+        p = PERSONALITIES[arrival.type];
+      const lanes =
+        arrival.type === "hog"
+          ? Array.from({ length: this.config.lanes }, (_, i) => i)
+          : Array.from(
+              { length: this.config.lanes },
+              (_, i) => this.config.lanes - 1 - i,
+            );
+      for (const lane of lanes) {
+        const car = {
+          ...arrival,
+          lane,
+          from: lane,
+          target: null,
+          blend: 1,
+          q: 0,
+          v: 0,
+          a: 0,
+          cooldown: 2,
+          brakeUntil: 0,
+          broken: false,
+          laps: 0,
+          travelled: 0,
+          distance: 0,
+          safety: false,
+        };
+        const n = this.neighbors(car, lane);
+        const speed = Math.min(p.speed / 3.6, n.front?.v ?? Infinity);
+        if (
+          n.gap < Math.max(6, speed * 0.5) ||
+          n.backGap < Math.max(6, (n.rear?.v ?? 0) * 0.5)
+        )
+          continue;
+        car.v = speed;
+        this.cars.push(car);
+        queue.shift();
+        this.entered++;
+        this.fleetVersion++;
+        break;
+      }
+    }
   }
   neighbors(car, lane, state = this) {
     let front = null,
@@ -305,16 +462,23 @@ export class Simulation {
       gap = Infinity,
       backGap = Infinity;
     for (const other of [...state.cars, ...state.obstacles]) {
-      if (other.id === car.id || !this.occupied(other, lane)) continue;
+      if (
+        other.id === car.id ||
+        !this.occupied(other, lane) ||
+        !this.sameRoad(car, other)
+      )
+        continue;
       const d = this.forward(car.q, other.q, lane);
       const g = d - (CAR_LENGTH + (other.length ?? CAR_LENGTH)) / 2;
-      if (g < gap) {
+      if ((this.route.closed || d >= 0) && g < gap) {
         front = other;
         gap = g;
       }
       if (!other.obstacle) {
-        const back = this.laneLength(lane) - d - CAR_LENGTH;
-        if (back < backGap) {
+        const back = this.route.closed
+          ? this.laneLength(lane) - d - CAR_LENGTH
+          : -d - CAR_LENGTH;
+        if ((this.route.closed || d < 0) && back < backGap) {
           rear = other;
           backGap = back;
         }
@@ -329,30 +493,38 @@ export class Simulation {
       return this.queueCache.get(state);
     const queues = Array.from({ length: this.config.lanes }, () => new Set());
     for (let lane = 0; lane < this.config.lanes; lane++) {
-      const entries = [...state.cars, ...state.obstacles]
-        .filter((c) => this.occupied(c, lane))
-        .sort((a, b) => a.q - b.q);
-      for (let i = 0; i < entries.length; i++) {
-        if (!entries[i].obstacle && !entries[i].broken) continue;
-        let leader = entries[i];
-        for (let offset = 1; offset < entries.length; offset++) {
-          const car = entries[mod(i - offset, entries.length)];
-          if (car.obstacle || car.broken || queues[lane].has(car.id)) break;
-          const gap =
-            this.forward(car.q, leader.q, lane) -
-            (CAR_LENGTH + (leader.length ?? CAR_LENGTH)) / 2;
-          if (gap > Math.max(55, car.v * 3.5)) break;
-          // Follow the connected slow queue, not unrelated traffic elsewhere
-          // around the ring. The first car directly facing the hazard may
-          // still be travelling quickly when it needs to get out of the way.
-          if (
-            !leader.obstacle &&
-            !leader.broken &&
-            (car.v * 3.6 > 70.5 || leader.v * 3.6 > 70.5)
+      for (let approach = 0; approach < this.route.approaches; approach++) {
+        const entries = [...state.cars, ...state.obstacles]
+          .filter(
+            (c) =>
+              this.occupied(c, lane) &&
+              (this.config.layout !== "cross" ||
+                (c.approach ?? 0) === approach),
           )
-            break;
-          queues[lane].add(car.id);
-          leader = car;
+          .sort((a, b) => a.q - b.q);
+        for (let i = 0; i < entries.length; i++) {
+          if (!entries[i].obstacle && !entries[i].broken) continue;
+          let leader = entries[i];
+          for (let offset = 1; offset < entries.length; offset++) {
+            if (!this.route.closed && i - offset < 0) break;
+            const car = entries[mod(i - offset, entries.length)];
+            if (car.obstacle || car.broken || queues[lane].has(car.id)) break;
+            const gap =
+              this.forward(car.q, leader.q, lane) -
+              (CAR_LENGTH + (leader.length ?? CAR_LENGTH)) / 2;
+            if (gap > Math.max(55, car.v * 3.5)) break;
+            // Follow the connected slow queue, not unrelated traffic elsewhere
+            // around the ring. The first car directly facing the hazard may
+            // still be travelling quickly when it needs to get out of the way.
+            if (
+              !leader.obstacle &&
+              !leader.broken &&
+              (car.v * 3.6 > 70.5 || leader.v * 3.6 > 70.5)
+            )
+              break;
+            queues[lane].add(car.id);
+            leader = car;
+          }
         }
       }
     }
@@ -418,6 +590,19 @@ export class Simulation {
   }
   safeLane(car, lane) {
     if (lane < 0 || lane >= this.config.lanes) return false;
+    if (
+      this.obstacles.some(
+        (o) =>
+          this.occupied(o, lane) &&
+          this.sameRoad(car, o) &&
+          (this.route.closed
+            ? Math.min(mod(o.q - car.q), mod(car.q - o.q))
+            : Math.abs(o.q - car.q)) *
+            this.laneLength(lane) <
+            (CAR_LENGTH + o.length) / 2 + 0.5,
+      )
+    )
+      return false;
     const { front, rear, gap, backGap } = this.neighbors(car, lane);
     const p = PERSONALITIES[car.type];
     if (car.type === "stuntman") {
@@ -638,6 +823,7 @@ export class Simulation {
   step(dt = STEP) {
     if (Math.abs(dt - STEP) > 1e-8)
       throw new Error("Use the fixed 0.05-second simulation step.");
+    if (this.stream) this.inflow();
     this.junction.update(this);
     const delayed =
       this.history[
@@ -764,9 +950,11 @@ export class Simulation {
       car.distance += move.advance * this.laneLength(car.lane);
       car.travelled += move.advance;
       const completed = Math.floor(car.travelled + 1e-9);
-      this.laps += completed - car.laps;
+      if (!this.stream) this.laps += completed - car.laps;
       car.laps = completed;
-      car.q = mod(car.q + move.advance);
+      car.q = this.route.closed
+        ? mod(car.q + move.advance)
+        : car.q + move.advance;
       car.v = move.v;
       if (car.target !== null) {
         car.blend = Math.min(1, car.blend + dt / LANE_CHANGE_TIME);
@@ -777,6 +965,14 @@ export class Simulation {
       }
     }
     this.time += dt;
+    if (this.stream) {
+      const leaving = this.cars.filter((c) => c.travelled >= 1 - 1e-9);
+      if (leaving.length) {
+        this.exited += leaving.length;
+        this.cars = this.cars.filter((c) => c.travelled < 1 - 1e-9);
+        this.fleetVersion++;
+      }
+    }
     this.history.push(this.snapshot());
     if (this.history.length > 43) this.history.shift();
     if (
@@ -801,13 +997,22 @@ export class Simulation {
       stopped: speeds.filter((v) => v < 5).length,
       density:
         this.cars.length /
-        (Array.from({ length: this.config.lanes }, (_, l) =>
+        ((Array.from({ length: this.config.lanes }, (_, l) =>
           this.laneLength(l),
-        ).reduce((a, b) => a + b, 0) /
+        ).reduce((a, b) => a + b, 0) *
+          this.route.approaches) /
           1000),
       efficiency: target ? average / target : 0,
       completedLaps: this.laps,
-      throughputPerMinute: this.time > 0 ? (this.laps * 60) / this.time : 0,
+      completedTrips: this.exited,
+      arrived: this.arrived,
+      entered: this.entered,
+      upstream: this.arrived - this.entered,
+      active: this.cars.length,
+      throughputPerMinute:
+        this.time > 0
+          ? ((this.stream ? this.exited : this.laps) * 60) / this.time
+          : 0,
     };
   }
   sample() {
@@ -849,21 +1054,27 @@ export class Simulation {
     c.brakeUntil = 0;
     this.log(`Car ${id}: repaired`);
   }
-  addObstacle(q, lane) {
-    q = mod(q);
+  addObstacle(q, lane, approach = 0) {
+    q = this.route.closed ? mod(q) : clamp(q, 0, 1);
     if (this.route.inside(q)) return false;
     lane = Math.round(clamp(lane, 0, this.config.lanes - 1));
     // Never place a physical object inside a vehicle or an existing object.
     const clear = [...this.cars, ...this.obstacles].every(
       (c) =>
         !this.occupied(c, lane) ||
-        Math.min(mod(c.q - q), mod(q - c.q)) * this.laneLength(lane) > 9,
+        !this.sameRoad(c, { approach }) ||
+        (this.route.closed
+          ? Math.min(mod(c.q - q), mod(q - c.q))
+          : Math.abs(c.q - q)) *
+          this.laneLength(lane) >
+          9,
     );
     if (!clear) return false;
     this.obstacles.push({
       id: `o${this.nextObstacle++}`,
       q,
       lane,
+      approach,
       target: null,
       v: 0,
       length: 5,
