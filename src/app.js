@@ -36,7 +36,8 @@ let running = false,
   tool = "select",
   selected = null,
   speedOverlay = false,
-  dirty = false,
+  configurationValid = true,
+  editPlaybackIntent = null,
   last = 0,
   accumulator = 0,
   lastHUD = -1,
@@ -63,13 +64,69 @@ function toast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($("toast").hidden = true), 3800);
 }
-function markDirty() {
-  dirty = true;
-  $("apply").classList.add("dirty");
-  $("setup-note").textContent =
-    "Setup changed. Apply & reset to use these settings.";
-  $("preset").value = "custom";
+function hasTraffic() {
+  return sim.stream ? sim.probabilityTotal > 0 : sim.cars.length > 0;
+}
+function formError() {
+  const values = KEYS.map((k) => Number($(`count-${k}`).value));
+  if (
+    values.some(
+      (n) =>
+        !Number.isFinite(n) ||
+        n < 0 ||
+        n > (mixMode === "stream" ? 100 : 180) ||
+        (mixMode === "fixed" && !Number.isInteger(n)),
+    )
+  )
+    return mixMode === "stream"
+      ? "Use probabilities between 0% and 100%."
+      : "Use whole car counts between 0 and 180.";
+  const total = updateTotal();
+  if (mixMode === "stream" && total !== 0 && Math.abs(total - 100) > 0.01)
+    return `Mix totals ${Number(total.toFixed(2))}%. Set 100% or use Balance. All zero stops arrivals.`;
+  if (mixMode === "fixed" && total > 180) return "Use 180 cars or fewer.";
+  for (const [id, min, max, integer] of [
+    ["seed", 1, 999999, true],
+    ["length", 600, 2000, true],
+    ["reaction", 0, 2, false],
+    ...(mixMode === "stream" ? [["interval", 0.2, 60, false]] : []),
+  ]) {
+    const value = Number($(id).value);
+    if (
+      !Number.isFinite(value) ||
+      value < min ||
+      value > max ||
+      (integer && !Number.isInteger(value))
+    )
+      return `${id === "interval" ? "Arrival interval" : id[0].toUpperCase() + id.slice(1)} must be between ${min} and ${max}${integer ? " (whole numbers)" : ""}.`;
+  }
+  return null;
+}
+function configurationChanged(custom = true) {
+  const resume = editPlaybackIntent ?? running;
+  if (custom !== false) $("preset").value = "custom";
   updateTotal();
+  let error = formError();
+  if (!error) {
+    configurationValid = true;
+    if (reset(readConfig(), { syncControls: false, resume, quiet: true })) {
+      editPlaybackIntent = hasTraffic() ? null : resume;
+      return true;
+    }
+    error = $("setup-note").textContent;
+  }
+  // Keep the new road visible while an in-progress mix or numeric field is
+  // invalid. Leave the user's inputs intact and resume once they are valid.
+  editPlaybackIntent = resume;
+  configurationValid = false;
+  const zero = Object.fromEntries(KEYS.map((k) => [k, 0]));
+  reset(
+    { ...readConfig(), counts: zero, probabilities: zero },
+    { syncControls: false, persist: false, quiet: true },
+  );
+  $("setup-note").textContent = error;
+  $("setup-note").classList.add("invalid");
+  return false;
 }
 function updateTotal() {
   const total = KEYS.reduce(
@@ -79,7 +136,7 @@ function updateTotal() {
   $("total").textContent = Number(total.toFixed(2));
   $("total").parentElement.classList.toggle(
     "invalid",
-    mixMode === "stream" && Math.abs(total - 100) > 0.01,
+    mixMode === "stream" && total !== 0 && Math.abs(total - 100) > 0.01,
   );
   return total;
 }
@@ -95,10 +152,12 @@ for (const [key, p] of Object.entries(PERSONALITIES)) {
         0,
         mixMode === "stream" ? 100 : 180,
       );
-      markDirty();
+      configurationChanged();
     }),
   );
-  row.querySelector("input").addEventListener("input", markDirty);
+  row
+    .querySelector("input")
+    .addEventListener("input", () => configurationChanged());
   const desc = row.querySelector(".driver-desc");
   desc.addEventListener("click", () => toast(p.description));
   desc.addEventListener("keydown", (e) => {
@@ -117,7 +176,7 @@ for (let lane = 1; lane <= 5; lane++) {
   b.addEventListener("click", () => {
     $("lanes").value = lane;
     updateLaneButtons();
-    markDirty();
+    configurationChanged();
   });
   $("lane-buttons").append(b);
 }
@@ -182,7 +241,7 @@ function updateTrafficFields(preserve = true) {
   $("normalize-probabilities").hidden = !stream;
   $("total-unit").textContent = stream ? "%" : " cars";
   $("mix-note").textContent = stream
-    ? "Chance of each personality for every arriving car. Total must be 100%."
+    ? "Chance of each arriving personality. Use 100% total, or zero all to stop arrivals."
     : "Choose exactly who gets on the closed road.";
   $("length-label").textContent = stream
     ? "Visible trip length"
@@ -232,15 +291,19 @@ function readConfig() {
   };
 }
 function updatePlay() {
+  $("play").disabled = !configurationValid || !hasTraffic();
+  $("step").disabled = !configurationValid;
   const wasStarted = sim.time > 0;
   $("play").innerHTML = running
     ? '<span aria-hidden="true">Ⅱ</span> Pause simulation'
     : `<span aria-hidden="true">▶</span> ${wasStarted ? "Resume" : "Start"} simulation`;
-  $("state").textContent = running
-    ? "EXPERIMENT RUNNING"
-    : wasStarted
-      ? "EXPERIMENT PAUSED"
-      : "READY TO ROLL";
+  $("state").textContent = !configurationValid
+    ? "COMPLETE SETUP"
+    : running
+      ? "EXPERIMENT RUNNING"
+      : wasStarted
+        ? "EXPERIMENT PAUSED"
+        : "READY TO ROLL";
   $("state-dot").classList.toggle("running", running);
 }
 function setRunning(value) {
@@ -248,28 +311,36 @@ function setRunning(value) {
   accumulator = 0;
   updatePlay();
 }
-function reset(config) {
+function reset(
+  config,
+  { syncControls = true, persist = true, resume = false, quiet = false } = {},
+) {
   let next;
   try {
     next = new Simulation(config);
   } catch (e) {
-    toast(e.message);
+    if (quiet) $("setup-note").textContent = e.message;
+    else toast(e.message);
     return false;
   }
   sim = next;
   selected = null;
-  dirty = false;
-  setRunning(false);
-  $("apply").classList.remove("dirty");
-  $("setup-note").textContent = sim.stream
-    ? "Road starts empty. Press play to begin arrivals."
-    : sim.route.entries.length
-      ? "Evenly spaced on open road; the junction starts clear."
-      : "Evenly spaced in each lane. Ready when you are.";
-  showConfig(sim.config);
-  try {
-    localStorage.setItem("loop-lab-setup-v1", JSON.stringify(sim.config));
-  } catch {}
+  setRunning(resume && configurationValid && hasTraffic());
+  $("setup-note").classList.remove("invalid");
+  $("setup-note").textContent = !hasTraffic()
+    ? "No drivers selected. Add a count or set an arriving mix to 100%."
+    : running
+      ? "Settings updated. Simulation restarted and is running."
+      : sim.stream
+        ? "Road starts empty. Press play to begin arrivals."
+        : sim.route.entries.length
+          ? "Evenly spaced on open road; the junction starts clear."
+          : "Evenly spaced in each lane. Ready when you are.";
+  if (syncControls) showConfig(sim.config);
+  if (persist)
+    try {
+      localStorage.setItem("loop-lab-setup-v1", JSON.stringify(sim.config));
+    } catch {}
   populateVehicles();
   updateHUD();
   draw();
@@ -323,8 +394,9 @@ function updateHUD() {
   $("stat-throughput").textContent =
     `${stats.throughputPerMinute.toFixed(1)} ${sim.stream ? "cars" : "laps"}/min · average`;
   $("flow-status").hidden = !sim.stream;
-  $("flow-status").textContent =
-    `${stats.active} on road · ${stats.entered} entered · ${stats.upstream} waiting upstream · ${(60 / sim.config.interval).toFixed(1)} arrivals/min`;
+  $("flow-status").textContent = !configurationValid
+    ? "Arrivals paused while setup is incomplete."
+    : `${stats.active} on road · ${stats.entered} entered · ${stats.upstream} waiting upstream · ${(hasTraffic() ? 60 / sim.config.interval : 0).toFixed(1)} arrivals/min`;
   $("junction-status").hidden = !sim.route.entries.length;
   $("junction-status").textContent = sim.junction.label(sim.time);
   $("road-caption").textContent =
@@ -344,17 +416,21 @@ function updateHUD() {
       : congested
         ? "THE RIPPLE IS SPREADING"
         : "AVERAGE ROAD SPEED";
-  $("center-copy").textContent = !sim.cars.length
-    ? sim.stream
-      ? "Press play. Cars arrive over time."
-      : "An empty road. Add some drivers."
-    : sim.time === 0
-      ? "Press play. Then stir things up."
-      : stats.stopped
-        ? `${stats.stopped} car${stats.stopped === 1 ? " is" : "s are"} almost stopped.`
-        : congested
-          ? "A little patience goes a long way."
-          : "Every driver is part of the flow.";
+  $("center-copy").textContent = !configurationValid
+    ? "Complete the setup to begin."
+    : !hasTraffic()
+      ? "An empty road. Add some drivers."
+      : !sim.cars.length
+        ? sim.stream
+          ? "Press play. Cars arrive over time."
+          : "An empty road. Add some drivers."
+        : sim.time === 0
+          ? "Press play. Then stir things up."
+          : stats.stopped
+            ? `${stats.stopped} car${stats.stopped === 1 ? " is" : "s are"} almost stopped.`
+            : congested
+              ? "A little patience goes a long way."
+              : "Every driver is part of the flow.";
   if (sim.time > 0) {
     $("insight").textContent = sim.obstacles.length
       ? `${sim.obstacles.length} obstacle${sim.obstacles.length > 1 ? "s are" : " is"} narrowing the road. Watch for queues upstream and gaps downstream.`
@@ -458,85 +534,40 @@ $("preset").addEventListener("change", () => {
   const p = PRESETS[$("preset").value];
   if (p) {
     showConfig(normalizeConfig(p));
-    dirty = true;
-    $("apply").classList.add("dirty");
-    $("setup-note").textContent =
-      "Scenario loaded. Apply & reset to put it on the road.";
+    configurationChanged(false);
   }
 });
 for (const id of ["length", "reaction", "seed", "interval"])
   $(id).addEventListener("input", () => {
     updateLabels();
-    markDirty();
+    configurationChanged();
   });
 for (const id of ["layout", "intersection"])
   $(id).addEventListener("change", () => {
     updateIntersectionFields();
     updateTrafficFields();
-    markDirty();
+    configurationChanged();
   });
 $("shuffle").addEventListener("click", () => {
   $("seed").value = Math.floor(Math.random() * 999998) + 1;
-  markDirty();
+  configurationChanged();
 });
-$("apply").addEventListener("click", () => {
-  if (
-    KEYS.some((k) => {
-      const n = Number($(`count-${k}`).value);
-      return (
-        !Number.isFinite(n) ||
-        n < 0 ||
-        n > (mixMode === "stream" ? 100 : 180) ||
-        (mixMode === "fixed" && !Number.isInteger(n))
-      );
-    })
-  ) {
-    toast(
-      mixMode === "stream"
-        ? "Each probability must be between 0% and 100%."
-        : "Use whole car counts between 0 and 180.",
-    );
-    return;
-  }
-  if (mixMode === "stream" && Math.abs(updateTotal() - 100) > 0.01) {
-    toast(
-      "Driver probabilities must add up to 100%. Use “Balance probabilities” to adjust them.",
-    );
-    return;
-  }
-  if (
-    mixMode === "stream" &&
-    (!Number.isFinite(Number($("interval").value)) ||
-      Number($("interval").value) < 0.2 ||
-      Number($("interval").value) > 60)
-  ) {
-    toast("Use an arrival interval between 0.2 and 60 seconds.");
-    return;
-  }
-  if (mixMode === "fixed" && updateTotal() > 180) {
-    toast("Keep the experiment to 180 cars or fewer.");
-    return;
-  }
-  const preset = $("preset").value;
-  if (reset(readConfig())) {
-    $("preset").value = preset;
-    toast("Fresh road. Your experiment is ready.");
-  }
+$("zero-cars").addEventListener("click", () => {
+  editPlaybackIntent = false;
+  setRunning(false);
+  for (const k of KEYS) $(`count-${k}`).value = 0;
+  configurationChanged();
 });
 $("restart").addEventListener("click", () => {
-  reset(sim.config);
-  toast("Same setup, same starting positions.");
+  configurationChanged(false);
 });
 $("play").addEventListener("click", () => {
-  if (!sim.cars.length && !sim.stream) {
-    toast("Add some drivers, then apply your setup.");
-    return;
-  }
+  if (!configurationValid || !hasTraffic()) return;
+  editPlaybackIntent = null;
   setRunning(!running);
-  if (dirty)
-    toast("Running the current road. Apply & reset to use your new setup.");
 });
 $("step").addEventListener("click", () => {
+  editPlaybackIntent = null;
   setRunning(false);
   sim.advance(1);
   updatePlay();
@@ -665,7 +696,10 @@ window.addEventListener("keydown", (e) => {
     return;
   if (e.code === "Space") {
     e.preventDefault();
-    if (sim.cars.length || sim.stream) setRunning(!running);
+    if (configurationValid && hasTraffic()) {
+      editPlaybackIntent = null;
+      setRunning(!running);
+    }
   }
   if (e.key === "Escape") {
     selected = null;
@@ -703,7 +737,7 @@ function frame(now) {
 }
 $("traffic").addEventListener("change", () => {
   updateTrafficFields();
-  markDirty();
+  configurationChanged();
 });
 $("normalize-probabilities").addEventListener("click", () => {
   const weights = KEYS.map((k) => ({
@@ -726,9 +760,12 @@ $("normalize-probabilities").addEventListener("click", () => {
     .slice(0, remainder)
     .forEach((w) => w.units++);
   rows.forEach((w) => ($(`count-${w.k}`).value = w.units / 100));
-  markDirty();
+  configurationChanged();
 });
 showConfig(sim.config);
+if (!hasTraffic())
+  $("setup-note").textContent =
+    "No drivers selected. Add a count or set an arriving mix to 100%.";
 $("preset").value =
   initial === PRESETS.stream
     ? "stream"

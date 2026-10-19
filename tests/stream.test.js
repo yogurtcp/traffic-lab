@@ -42,6 +42,28 @@ test("streams start empty, schedule arrivals in simulation time, and reset repro
   a.advance(10);
   assert.deepEqual(a.cars, b.cars);
 });
+test("zero probabilities clear the road, stop arrivals, and allow a new mix", () => {
+  const sim = new Simulation(config());
+  sim.addObstacle(0.001, 0);
+  sim.addObstacle(0.001, 1);
+  sim.advance(10);
+  assert.ok(sim.stats.upstream > 0);
+  sim.reset(config({ probabilities: { regular: 0 } }));
+  sim.advance(60);
+  assert.equal(sim.cars.length, 0);
+  assert.equal(sim.obstacles.length, 0);
+  assert.equal(sim.arrived, 0);
+  assert.equal(sim.entered, 0);
+  assert.equal(sim.exited, 0);
+  assert.equal(sim.stats.upstream, 0);
+  assert.equal(sim.stats.throughputPerMinute, 0);
+  conservation(sim);
+  sim.reset(config({ probabilities: { slowpoke: 100 } }));
+  sim.advance(5);
+  assert.equal(sim.arrived, 3);
+  assert.ok(sim.cars.every((c) => c.type === "slowpoke"));
+  conservation(sim);
+});
 test("each car exits once, never wraps on the U, and throughput counts departures", () => {
   const sim = new Simulation(config({ interval: 60 }));
   sim.step();

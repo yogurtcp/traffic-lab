@@ -25,6 +25,13 @@ test("stream CLI accepts probability mixes and rejects invalid intervals and tot
   assert.equal(e.config.traffic, "stream");
   assert.equal(e.config.interval, 1.5);
   assert.equal(e.config.probabilities.stuntman, 0);
+  const empty = resolveExperiment(
+    {},
+    { layout: "u", probabilities: "regular=0" },
+  );
+  assert.ok(
+    Object.values(empty.config.probabilities).every((value) => value === 0),
+  );
   assert.throws(
     () => resolveExperiment({}, { layout: "u", probabilities: "regular=20" }),
     /100%/,

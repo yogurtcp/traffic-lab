@@ -105,11 +105,14 @@ export function resolveExperiment(scenario = {}, options = {}) {
   const normalized = normalizeConfig(config);
   if (
     normalized.traffic === "stream" &&
+    Object.values(normalized.probabilities).some((value) => value > 0) &&
     Math.abs(
       Object.values(normalized.probabilities).reduce((a, b) => a + b, 0) - 100,
     ) > 0.01
   )
-    throw new Error("Driver probabilities must add up to 100%.");
+    throw new Error(
+      "Driver probabilities must add up to 100%, or all be zero.",
+    );
   for (const [key, min, max, integer] of [
     ["lanes", 1, 5, true],
     ["length", 600, 2000, true],
