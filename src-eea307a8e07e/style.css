@@ -1316,3 +1316,53 @@ dialog a {
     font-size: 14px;
   }
 }
+
+.replay-controls {
+  padding: 0 20px 14px;
+  background: #fffefb;
+  border-bottom: 1px solid var(--line);
+}
+.replay-heading,
+.replay-track {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.replay-heading {
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+.replay-heading label {
+  font-weight: 600;
+}
+#replay-position {
+  font-variant-numeric: tabular-nums;
+  color: #6b7863;
+}
+.replay-track input {
+  flex: 1;
+  min-width: 40px;
+  width: auto;
+}
+.replay-track .square {
+  width: 44px;
+  flex-shrink: 0;
+}
+#return-live {
+  font-size: 10px;
+  white-space: nowrap;
+  padding: 8px 0;
+}
+#replay-note {
+  font-size: 9px;
+  color: #7b8472;
+  margin: 6px 0 0;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.replay-controls.replaying #replay-position {
+  color: #ad663c;
+}

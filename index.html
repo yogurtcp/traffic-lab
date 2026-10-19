@@ -10,8 +10,8 @@
     />
     <title>Loop Lab — a traffic playground</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src-9452fb7a9be5/style.css" />
-    <script type="module" src="./src-9452fb7a9be5/app.js"></script>
+    <link rel="stylesheet" href="./src-eea307a8e07e/style.css" />
+    <script type="module" src="./src-eea307a8e07e/app.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -247,6 +247,45 @@
               </div>
               <span class="keyboard-hint"><kbd>space</kbd> to pause</span>
             </div>
+            <div
+              class="replay-controls"
+              role="group"
+              aria-label="Replay recorded traffic"
+            >
+              <div class="replay-heading">
+                <label for="replay-timeline">Replay</label>
+                <output id="replay-position" for="replay-timeline"
+                  >LIVE · 00:00</output
+                >
+              </div>
+              <div class="replay-track">
+                <button
+                  id="rewind"
+                  class="square"
+                  title="Pause and rewind ten simulated seconds"
+                  aria-label="Rewind ten seconds"
+                >
+                  −10s
+                </button>
+                <input
+                  id="replay-timeline"
+                  type="range"
+                  min="0"
+                  max="0"
+                  step="0.05"
+                  value="0"
+                  aria-label="Recorded simulation time"
+                  disabled
+                />
+                <button id="return-live" class="quiet" disabled>
+                  Back to live
+                </button>
+              </div>
+              <p id="replay-note">
+                Last 3 simulated minutes. Rewind pauses live traffic; press play
+                to watch again.
+              </p>
+            </div>
             <div class="tools" role="group" aria-label="Road interaction tool">
               <span class="tools-label">STIR THINGS UP</span
               ><button data-tool="select" class="active">
@@ -399,8 +438,10 @@
           on an empty patch of road.
         </li>
         <li>
-          Compare the graphs. Red diagonal bands in the road view chart reveal
-          moving slowdowns.
+          Use −10s or the Replay timeline to watch the last three simulated
+          minutes again. Back to live returns to your paused experiment. Compare
+          the graphs. Red diagonal bands in the road view chart reveal moving
+          slowdowns.
         </li>
       </ol>
       <h3>A few ground rules</h3>
