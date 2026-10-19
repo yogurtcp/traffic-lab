@@ -101,7 +101,7 @@ function updateReplay() {
     : "Last 3 simulated minutes. Rewind pauses live traffic; press play to watch again.";
   document
     .querySelectorAll(
-      '[data-tool]:not([data-tool="select"]), #vehicle-brake, #vehicle-break, #vehicle-repair, #clear, #pulse, #selection [data-action]',
+      '[data-tool]:not([data-tool="select"]), #vehicle-brake, #vehicle-break, #vehicle-repair, #clear, #pulse, #vehicle-variance, #selection [data-action]',
     )
     .forEach((button) => (button.disabled = replaying));
 }
@@ -164,6 +164,15 @@ function formError() {
     return mixMode === "stream"
       ? "Use probabilities between 0% and 100%."
       : "Use whole car counts between 0 and 180.";
+  if (
+    KEYS.some(
+      (k) =>
+        !Number.isFinite(Number($(`variance-${k}`).value)) ||
+        Number($(`variance-${k}`).value) < 0 ||
+        Number($(`variance-${k}`).value) > 20,
+    )
+  )
+    return "Use speed variance between ±0 and ±20 km/h.";
   const total = updateTotal();
   if (mixMode === "stream" && total !== 0 && Math.abs(total - 100) > 0.01)
     return `Mix totals ${Number(total.toFixed(2))}%. Set 100% or use Balance. All zero stops arrivals.`;
@@ -226,7 +235,7 @@ function updateTotal() {
 for (const [key, p] of Object.entries(PERSONALITIES)) {
   const row = document.createElement("div");
   row.className = "driver";
-  row.innerHTML = `<span class="car-icon" style="--color:${p.color}" aria-hidden="true"></span><div class="driver-desc" tabindex="0" title="${p.description}" aria-label="${p.name}: ${p.description}"><span class="driver-name">${p.name}</span><span class="driver-speed">${p.speed} km/h${key === "stuntman" ? " max" : ""}</span></div><div class="driver-count"><button data-delta="-1" aria-label="Remove one ${p.name}">−</button><input id="count-${key}" type="number" min="0" max="180" value="0" aria-label="Number of ${p.name} drivers"><span class="probability-unit">%</span><button data-delta="1" aria-label="Add one ${p.name}">+</button></div>`;
+  row.innerHTML = `<span class="car-icon" style="--color:${p.color}" aria-hidden="true"></span><div class="driver-desc" tabindex="0" title="${p.description}" aria-label="${p.name}: ${p.description}"><span class="driver-name">${p.name}</span><span class="driver-speed">${p.speed} km/h${key === "stuntman" ? " max" : ""}</span></div><div class="driver-count"><button data-delta="-1" aria-label="Remove one ${p.name}">−</button><input id="count-${key}" type="number" min="0" max="180" value="0" aria-label="Number of ${p.name} drivers"><span class="probability-unit">%</span><button data-delta="1" aria-label="Add one ${p.name}">+</button></div><div class="driver-variance"><label for="variance-${key}">Speed variance</label><input id="variance-${key}" type="range" min="0" max="20" step="1" value="0" aria-label="${p.name} speed variance in km/h"><output id="variance-value-${key}" for="variance-${key}">±0 km/h</output></div>`;
   row.querySelectorAll("[data-delta]").forEach((b) =>
     b.addEventListener("click", () => {
       const input = $(`count-${key}`);
@@ -239,8 +248,12 @@ for (const [key, p] of Object.entries(PERSONALITIES)) {
     }),
   );
   row
-    .querySelector("input")
+    .querySelector(`#count-${key}`)
     .addEventListener("input", () => configurationChanged());
+  row.querySelector(`#variance-${key}`).addEventListener("input", () => {
+    updateLabels();
+    configurationChanged();
+  });
   const desc = row.querySelector(".driver-desc");
   desc.addEventListener("click", () => toast(p.description));
   desc.addEventListener("keydown", (e) => {
@@ -285,6 +298,7 @@ function showConfig(config) {
   $("length").value = config.length;
   $("reaction").value = config.reaction;
   $("seed").value = config.seed;
+  for (const k of KEYS) $(`variance-${k}`).value = config.speedVariance[k];
   updateTrafficFields(false);
   updateLaneButtons();
   updateLabels();
@@ -339,6 +353,13 @@ function updateTrafficFields(preserve = true) {
   updateTotal();
 }
 function updateLabels() {
+  for (const k of KEYS) {
+    $(`variance-value-${k}`).textContent = `±${$(`variance-${k}`).value} km/h`;
+    $(`variance-${k}`).setAttribute(
+      "aria-valuetext",
+      `plus or minus ${$(`variance-${k}`).value} kilometres per hour`,
+    );
+  }
   $("length-value").textContent =
     `${Number($("length").value).toLocaleString()} m`;
   $("reaction-value").textContent =
@@ -353,6 +374,9 @@ function readConfig() {
   return {
     traffic: $("traffic").value,
     interval: Number($("interval").value),
+    speedVariance: Object.fromEntries(
+      KEYS.map((k) => [k, Number($(`variance-${k}`).value)]),
+    ),
     probabilities:
       mixMode === "stream"
         ? Object.fromEntries(
@@ -548,7 +572,7 @@ function updateHUD() {
     card.hidden = false;
     // Keep the controls mounted as live metrics change, preserving keyboard focus.
     if (card.dataset.selected !== String(car.id)) {
-      card.innerHTML = `<button class="close-selection" aria-label="Close vehicle details">×</button><strong><span style="color:${p.color}">●</span> #${car.id} ${p.name}</strong><p style="white-space:pre-line"></p><button data-action="brake">Brake 3s</button><button class="breakdown-action"></button>`;
+      card.innerHTML = `<button class="close-selection" aria-label="Close vehicle details">×</button><strong><span style="color:${p.color}">●</span> #${car.id} ${p.name}</strong><p style="white-space:pre-line"></p><div class="vehicle-variance"><label for="vehicle-variance">Speed variance</label><input id="vehicle-variance" type="range" min="0" max="20" step="1" aria-label="Selected car speed variance in km/h"><output for="vehicle-variance"></output></div><button data-action="brake">Brake 3s</button><button class="breakdown-action"></button>`;
       card.dataset.selected = String(car.id);
     }
     const status = car.broken
@@ -565,7 +589,10 @@ function updateHUD() {
                 ? "Accelerating"
                 : "Cruising";
     card.querySelector("p").textContent =
-      `${Math.round(car.v * 3.6)} / ${p.speed} km/h · lane ${car.lane + 1}\n${Number.isFinite(n.gap) ? Math.max(0, n.gap).toFixed(1) + " m to next vehicle" : "Open road ahead"}\n${status}${sim.stream ? " · " + Math.round(car.q * 100) + "% through road" : " · " + car.laps + " full laps"}`;
+      `${Math.round(car.v * 3.6)} km/h · target ${(sim.desiredSpeed(car) * 3.6).toFixed(1)} · base ${p.speed} · lane ${car.lane + 1}\n${Number.isFinite(n.gap) ? Math.max(0, n.gap).toFixed(1) + " m to next vehicle" : "Open road ahead"}\n${status}${sim.stream ? " · " + Math.round(car.q * 100) + "% through road" : " · " + car.laps + " full laps"}`;
+    card.querySelector("#vehicle-variance").value = sim.variance(car);
+    card.querySelector(".vehicle-variance output").textContent =
+      `±${sim.variance(car)} km/h`;
     const button = card.querySelector(".breakdown-action");
     button.dataset.action = car.broken ? "repair" : "breakdown";
     button.textContent = car.broken ? "Repair" : "Break down";
@@ -621,6 +648,14 @@ function action(kind, id) {
   updateHUD();
   draw();
 }
+$("selection").addEventListener("input", (e) => {
+  if (e.target.id !== "vehicle-variance" || !liveEditAllowed()) return;
+  if (sim.setSpeedVariance(selected, Number(e.target.value))) {
+    recordLive();
+    updateHUD();
+    draw();
+  }
+});
 $("selection").addEventListener("click", (e) => {
   const button = e.target.closest("button");
   if (!button) return;

@@ -197,6 +197,9 @@ export function normalizeConfig(input = {}) {
         ? "stream"
         : "fixed",
     interval: numeric(input.interval, 2, 0.2, 60),
+    speedVariance: Object.fromEntries(
+      KEYS.map((k) => [k, numeric(input.speedVariance?.[k] ?? 0, 0, 0, 20)]),
+    ),
     probabilities: Object.fromEntries(
       KEYS.map((k) => [
         k,
@@ -234,9 +237,37 @@ function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+// Stateless seeded noise keeps each car independent without consuming the
+// arrival/shuffle RNG. Smooth interpolation avoids frame-to-frame jitter.
+function speedNoise(seed, id, index) {
+  let x =
+    Math.imul(seed ^ 0x51ed270b, 0x85ebca6b) ^
+    Math.imul(id, 0xc2b2ae35) ^
+    Math.imul(index, 0x27d4eb2d);
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+}
 export class Simulation {
   constructor(config = PRESETS.mixed) {
     this.reset(config);
+  }
+  variance(car) {
+    return car.speedVariance ?? this.config.speedVariance[car.type];
+  }
+  desiredSpeed(car, time = this.time) {
+    const base = PERSONALITIES[car.type].speed;
+    const amplitude = this.variance(car);
+    if (!amplitude) return base / 3.6;
+    const period = 6 + speedNoise(this.config.seed, car.id, -1) * 6;
+    const phase = speedNoise(this.config.seed, car.id, -2) * period;
+    const position = (time + phase) / period;
+    const index = Math.floor(position),
+      fraction = position - index;
+    const blend = fraction * fraction * (3 - 2 * fraction);
+    const a = speedNoise(this.config.seed, car.id, index) * 2 - 1;
+    const b = speedNoise(this.config.seed, car.id, index + 1) * 2 - 1;
+    return clamp(base + amplitude * (a + (b - a) * blend), 10, 160) / 3.6;
   }
   laneLength(lane) {
     return (
@@ -327,6 +358,7 @@ export class Simulation {
       types.map((type, i) => ({
         id: id++,
         type,
+        speedVariance: this.config.speedVariance[type],
         lane,
         target: null,
         from: lane,
@@ -343,6 +375,7 @@ export class Simulation {
         safety: false,
       })),
     );
+    for (const car of this.cars) car.v = this.desiredSpeed(car);
     if (this.route.entries.length) {
       for (const car of this.cars) {
         car.q = this.route.spawn(car.q, 7 / this.laneLength(car.lane));
@@ -383,6 +416,7 @@ export class Simulation {
         target: c.target,
         v: c.v,
         type: c.type,
+        speedVariance: c.speedVariance,
         broken: c.broken,
         approach: c.approach ?? 0,
       })),
@@ -416,8 +450,7 @@ export class Simulation {
     }
     for (const queue of this.pending) {
       if (!queue.length || this.cars.length >= 180) continue;
-      const arrival = queue[0],
-        p = PERSONALITIES[arrival.type];
+      const arrival = queue[0];
       const lanes =
         arrival.type === "hog"
           ? Array.from({ length: this.config.lanes }, (_, i) => i)
@@ -428,6 +461,7 @@ export class Simulation {
       for (const lane of lanes) {
         const car = {
           ...arrival,
+          speedVariance: this.config.speedVariance[arrival.type],
           lane,
           from: lane,
           target: null,
@@ -444,7 +478,7 @@ export class Simulation {
           safety: false,
         };
         const n = this.neighbors(car, lane);
-        const speed = Math.min(p.speed / 3.6, n.front?.v ?? Infinity);
+        const speed = Math.min(this.desiredSpeed(car), n.front?.v ?? Infinity);
         if (
           n.gap < Math.max(6, speed * 0.5) ||
           n.backGap < Math.max(6, (n.rear?.v ?? 0) * 0.5)
@@ -546,7 +580,7 @@ export class Simulation {
     return clamp(
       p.accel *
         (1 -
-          (car.v / (p.speed / 3.6)) ** 4 -
+          (car.v / this.desiredSpeed(car)) ** 4 -
           (desiredGap / Math.max(0.2, gap)) ** 2),
       -8,
       p.accel,
@@ -692,7 +726,7 @@ export class Simulation {
       return;
     const old = delayed.cars.find((c) => c.id === car.id) ?? car;
     const { front, gap } = this.neighbors(old, car.lane, delayed);
-    const desiredSpeed = PERSONALITIES[car.type].speed / 3.6;
+    const desiredSpeed = this.desiredSpeed(car);
     const passMargin = 2 / 3.6;
     const lookAhead = Math.max(55, old.v * 3.5);
     const passingRange = Math.max(80, desiredSpeed * 6);
@@ -867,7 +901,11 @@ export class Simulation {
       const nextV = clamp(
         car.v + a * dt,
         0,
-        PERSONALITIES[car.type].speed / 3.6,
+        Math.max(
+          car.v,
+          Math.min(160, PERSONALITIES[car.type].speed + this.variance(car)) /
+            3.6,
+        ),
       );
       const length = this.laneLength(
         car.target === null
@@ -991,7 +1029,7 @@ export class Simulation {
     const speeds = this.cars.map((c) => c.v * 3.6);
     const average = speeds.reduce((a, b) => a + b, 0) / (speeds.length || 1);
     const target =
-      this.cars.reduce((s, c) => s + PERSONALITIES[c.type].speed, 0) /
+      this.cars.reduce((s, c) => s + this.desiredSpeed(c) * 3.6, 0) /
       (speeds.length || 1);
     return {
       average,
@@ -1037,6 +1075,14 @@ export class Simulation {
   log(text) {
     this.events.unshift({ time: this.time, text });
     this.events.length = Math.min(5, this.events.length);
+  }
+  setSpeedVariance(id, value) {
+    const car = this.cars.find((c) => c.id === id);
+    if (!car || !Number.isFinite(value) || value < 0 || value > 20)
+      return false;
+    car.speedVariance = value;
+    this.log(`Car ${id}: speed variance ±${value} km/h`);
+    return true;
   }
   brakeCar(id, duration = 3) {
     const c = this.cars.find((c) => c.id === id);

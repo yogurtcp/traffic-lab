@@ -2,7 +2,7 @@
 
 ## Automated model checks
 
-`npm test`: 73 passing tests. Covers evenly spaced starts, seeded reproducibility, the leftmost slowpoke, lap geometry and speed units, recovery to all eight desired speeds without overshooting, smooth homogeneous flow across unequal lap lengths, reaction delay against an unbraked control, temporary braking versus persistent breakdown, repairs, obstacle rejection/removal, passing rules on both sides and across nonadjacent lanes, front/rear merge gaps, dense traffic with maximum reaction delay, queue separation, and a brake-induced traffic wave.
+`npm test`: 80 passing tests. Covers evenly spaced starts, seeded reproducibility, the leftmost slowpoke, lap geometry and speed units, recovery to all eight desired speeds without overshooting, smooth homogeneous flow across unequal lap lengths, reaction delay against an unbraked control, temporary braking versus persistent breakdown, repairs, obstacle rejection/removal, passing rules on both sides and across nonadjacent lanes, front/rear merge gaps, dense traffic with maximum reaction delay, queue separation, and a brake-induced traffic wave.
 
 Twelve stream tests cover empty starts, scheduled simulated-time arrivals, seeded probability draws, 1,000 blocked arrivals retained upstream, conservation (`arrived = entered + upstream`, `entered = active + exited`), queue recovery after repair, single exits without wrapping, arrivals on retained loop layouts, finite neighbors, isolation of all four crossing routes, conflict-free stop/light/roundabout operation with one/three lanes, exit-based rates, finite endpoint geometry, the 40 m controlled section, approach-specific obstacle placement, and phone/desktop pointer hits with one/three/five lanes. Blocked preferred lanes and blocked entrances must leave other lanes/entrances available. Obstacles just behind a proposed merge still reserve physical space.
 
@@ -28,7 +28,11 @@ Stress cases ran for 30 simulated seconds each on 1, 3, and 5 lanes with a short
 
 Five replay tests verify historical car positions, brakes, obstacles, clearing incidents, event logs and chart samples; historical waiting counts and signal phases; bounded retention and seeks at either end; exit and repeated-lap throughput; and that seeking leaves the live run and its future seeded arrivals unchanged. The buffer keeps snapshots at 10 Hz for three simulated minutes and shares immutable chart samples rather than copying the reaction history.
 
+Seven variance tests cover zero defaults and legacy steady targets, bounded smooth target motion and actual acceleration, independent vehicles, seed/reset reproducibility, unchanged personality/entrance draws, individual overrides without resetting the run, historical targets in replay, physical deceleration when narrowing a range, rejection of invalid values, dense maximum-variance separation on a loop/U/all three open controls, and CLI/timed-event validation.
+
 ## Interface checks
+
+The variance DOM harness verifies all eight default sliders and outputs, local persistence, immediate reset with playback/focus retained, per-car overrides without resetting the clock or fleet, isolation from other cars and type defaults, historical values and read-only controls in replay, and mode/preset/Zero all behavior. The existing instant-settings and replay harnesses also pass. A 12-second variance run rendered a 640 × 480 MP4 with matching JSON/PNG companions; the exported variance map was checked, every video frame decoded successfully, and the poster/variance legend were inspected.
 
 The replay JSDOM harness exercises rewind while running, timeline scrubbing, recorded vehicle inspection, replay playback/stepping/end-of-recording, historical incidents and counters, disabled intervention buttons, returning to the exact paused live state and resuming, and recording resets after settings, Restart and Zero all. Both fixed-count and arrival traffic are covered. The instant-settings harness still passes. Recorded U, cross and circle frames also render successfully through the real native Canvas road/chart renderers.
 

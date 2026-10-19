@@ -244,7 +244,7 @@ export async function renderVideo(
         ctx.fillStyle = "#53664b";
         ctx.font = `${Math.round(11 * fontScale)}px sans-serif`;
         ctx.fillText(
-          `${count}${sim.stream ? "%" : ""}  ${p.name}`,
+          `${count}${sim.stream ? "%" : ""}  ${p.name}${sim.config.speedVariance[key] ? ` · ±${sim.config.speedVariance[key]} km/h` : ""}`,
           x + 36,
           at,
           w - 50,

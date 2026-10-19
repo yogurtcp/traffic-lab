@@ -20,6 +20,7 @@ Options:
   --cars TYPE=COUNT,...  Exact mix; unspecified driver types have zero cars
   --lanes N             1–5 lanes
   --length METRES       600–2000 m base lap
+  --speed-variance MIX   ±km/h per type, e.g. regular=5,slowpoke=3 (0–20)
   --reaction SECONDS    Shared 0–2 second reaction delay
   --seed N              Reproducible shuffle seed
   --duration SECONDS    Simulated time; default 120
@@ -45,6 +46,7 @@ async function main() {
     "traffic",
     "interval",
     "probabilities",
+    "speed-variance",
     "lanes",
     "length",
     "reaction",

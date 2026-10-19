@@ -49,6 +49,19 @@ export function parseProbabilities(text) {
   }
   return result;
 }
+export function parseSpeedVariance(text) {
+  const result = Object.fromEntries(KEYS.map((k) => [k, 0]));
+  for (const entry of text.split(",")) {
+    const [key, value, ...extra] = entry.trim().split("=");
+    choice(key, "driver type", KEYS);
+    if (value === undefined || value.trim() === "" || extra.length)
+      throw new Error(
+        "Use speed variance such as regular=5,slowpoke=3 (±km/h).",
+      );
+    result[key] = number(value, `${key} speed variance`, 0, 20);
+  }
+  return result;
+}
 export function resolveExperiment(scenario = {}, options = {}) {
   const preset = options.preset ?? scenario.preset ?? "mixed";
   choice(preset, "preset", Object.keys(PRESETS));
@@ -64,6 +77,8 @@ export function resolveExperiment(scenario = {}, options = {}) {
     "interval",
   ])
     if (options[key] !== undefined) config[key] = options[key];
+  if (options["speed-variance"] !== undefined)
+    config.speedVariance = parseSpeedVariance(options["speed-variance"]);
   if (options.cars !== undefined) config.counts = parseCars(options.cars);
   if (options.probabilities !== undefined)
     config.probabilities = parseProbabilities(options.probabilities);
@@ -101,6 +116,11 @@ export function resolveExperiment(scenario = {}, options = {}) {
     for (const [k, v] of Object.entries(config.probabilities)) {
       choice(k, "driver type", KEYS);
       number(v, `${k} probability`, 0, 100);
+    }
+  if (config.speedVariance)
+    for (const [k, v] of Object.entries(config.speedVariance)) {
+      choice(k, "driver type", KEYS);
+      number(v, `${k} speed variance`, 0, 20);
     }
   const normalized = normalizeConfig(config);
   if (
@@ -161,12 +181,13 @@ export function resolveExperiment(scenario = {}, options = {}) {
         "brake",
         "breakdown",
         "repair",
+        "speed-variance",
         "obstacle",
         "remove-obstacle",
         "clear",
       ]);
       const result = { ...event, at, type };
-      if (["brake", "breakdown", "repair"].includes(type))
+      if (["brake", "breakdown", "repair", "speed-variance"].includes(type))
         result.car = number(
           event.car,
           `event ${i + 1} car ID`,
@@ -180,6 +201,13 @@ export function resolveExperiment(scenario = {}, options = {}) {
           `event ${i + 1} brake duration`,
           0.05,
           120,
+        );
+      if (type === "speed-variance")
+        result.value = number(
+          event.value,
+          `event ${i + 1} speed variance`,
+          0,
+          20,
         );
       if (type === "obstacle") {
         result.q = number(event.q, `event ${i + 1} road position`, 0, 0.999999);
@@ -254,6 +282,8 @@ export class ExperimentRunner {
         this.sim.brakeCar(event.car, event.duration);
       else if (event.type === "breakdown") this.sim.breakCar(event.car);
       else if (event.type === "repair") this.sim.repairCar(event.car);
+      else if (event.type === "speed-variance")
+        applied = this.sim.setSpeedVariance(event.car, event.value);
       else if (event.type === "clear") this.sim.clearIncidents();
       else if (event.type === "obstacle") {
         applied = this.sim.addObstacle(

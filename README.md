@@ -32,6 +32,10 @@ For continuous arrivals and exit-based throughput, use `--scenario examples/open
 
 To retain exact-count experiments, choose a circle, rounded rectangle, or four-arm loop and select **Fixed cars · closed loop**. The combined limit remains 180 and cars must physically fit. Circle/rectangle cars start evenly spaced at desired speeds; the four-arm loop starts at rest with the junction clear. Switching setup modes preserves separate counts and probability mixes. A seed reproduces arrival personalities, entrances, and driver order. Existing saved setups migrate to the new arrivals mode with their old fixed counts retained for switching back.
 
+Each driver type has a **Speed variance** slider from **±0 to ±20 km/h**. For example, Regular at ±5 varies its target within 85–95 km/h. Each car independently drifts between seeded random targets over 6–12 seconds, accelerating/braking through the normal driving model; traffic, obstacles, and junctions can slow it further. The absolute top speed remains 160 km/h. Zero keeps the original steady target and is the default for saved setups and presets.
+
+You can also inspect a car and adjust **its own Speed variance** during the run. This affects that vehicle without resetting the road or changing the type default. The inspector shows actual speed, current target, and base speed. Individual adjustments appear in the event log and replay; replay's slider is read-only. Type-default changes reset immediately like other settings, while individual overrides last for that car in the current run.
+
 Use **−10s** or drag the **Replay** timeline when a jam appears. The last three simulated minutes are recorded automatically, including incidents, vehicle details, charts, and throughput at each moment. Rewinding pauses the live run. **Play replay**, **+1s**, and the Time selector let you inspect how congestion developed; replay stops at the recording's end. **Back to live** returns to the exact paused live state, where you can resume or intervene. Road interventions are disabled during replay. Changing settings, Restart, or Zero all starts a fresh recording; recordings stay in this browser session and are not saved on reload.
 
 Space toggles playback when focus is outside an input or button. Escape returns to Inspect. Pause, one-second stepping, restart, and ½×–5× time controls help inspect the chain reaction. Background tabs do not accumulate simulation time. Setup is saved locally; running experiments are not saved.
@@ -122,6 +126,7 @@ Deployment requires Git and authenticated GitHub CLI. Push source to `main`, the
 - `tests/cli.test.js` — scenario validation, deterministic interventions, metrics, and CLI output protection.
 - `src/replay.js` — bounded, read-only recordings for timeline playback.
 - `tests/replay.test.js` — historical cars/incidents/charts/throughput, junction states, bounded retention, and unchanged future arrivals.
+- `tests/variance.test.js` — smooth independent speed drift, bounds, reproducibility, individual overrides/replay, dense traffic safety, and CLI configuration.
 - `tests/stream.test.js` — arrivals, probabilities, upstream conservation/recovery, single exits, finite geometry, approach isolation, and controlled open junctions.
 - `scripts/simulate.mjs`, `scripts/lib/` — command-line experiments and MP4/JSON/PNG export.
 - `examples/long-arms.json` — reproducible three-minute video scenario.

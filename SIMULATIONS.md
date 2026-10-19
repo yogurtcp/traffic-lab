@@ -48,6 +48,10 @@ npm run simulate -- --preset wave --duration 600 --no-video --output videos/wave
 
 Use `npm run simulate -- --help` for all flags. Command-line values override scenario settings. Available presets are `stream`, `crossing`, `mixed`, `perfect`, `wave`, `hogs`, and `junction`. The first two use arrivals; the original presets retain fixed counts.
 
+## Speed variance
+
+Add `--speed-variance regular=5,slowpoke=3` to any run, or put `"speedVariance": { "regular": 5, "slowpoke": 3 }` inside scenario `config`. Values are ±km/h from 0–20, with omitted types at zero. Each car drifts independently between seeded targets over 6–12 seconds; target changes remain smooth, and actual speed follows the normal acceleration, braking, safety, and junction rules. The absolute ceiling stays 160 km/h. Zero retains the original steady targets. Changing variance does not consume the arrival/personality random sequence. Video legends and exported configuration include the per-type settings.
+
 ## Timed interventions
 
 Save a JSON scenario with a `config`, timing settings, and an `events` array. See [the complete example](examples/long-arms.json). Events use simulated seconds; lanes are **1-based**, with lane 1 the leftmost lane. Car IDs are stable for a given configuration and seed. The browser's vehicle list shows the same IDs for the same setup.
@@ -80,6 +84,7 @@ Save a JSON scenario with a `config`, timing settings, and an `events` array. Se
 | `brake` | `car`, optional `duration` (default 3 s) | Temporary braking. |
 | `breakdown` | `car` | Stops a car until repaired. |
 | `repair` | `car` | Releases that car. |
+| `speed-variance` | `car`, `value` (0–20) | Changes that vehicle’s ±km/h variation without resetting the run. |
 | `obstacle` | `lane`, `q` (0–1, excluding 1) | Places a stationary blockage at route progress `q`. |
 | `remove-obstacle` | `id`, e.g. `"o1"` | Removes an existing obstacle by ID. |
 | `clear` | — | Repairs cars, ends brake interventions, and removes obstacles. |
