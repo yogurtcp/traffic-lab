@@ -10,8 +10,8 @@
     />
     <title>Loop Lab — a traffic playground</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src-a9b2f938f6a0/style.css" />
-    <script type="module" src="./src-a9b2f938f6a0/app.js"></script>
+    <link rel="stylesheet" href="./src-9452fb7a9be5/style.css" />
+    <script type="module" src="./src-9452fb7a9be5/app.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -155,9 +155,12 @@
             Chance of each personality for every arriving car.
           </p>
           <div id="drivers" class="drivers"></div>
-          <button id="normalize-probabilities" class="quiet normalize-mix">
-            Balance probabilities to 100%
-          </button>
+          <div class="driver-actions">
+            <button id="zero-cars" class="quiet">Zero all</button>
+            <button id="normalize-probabilities" class="quiet normalize-mix">
+              Balance to 100%
+            </button>
+          </div>
           <div class="seed-row">
             <label for="seed">Shuffle seed</label
             ><input
@@ -175,11 +178,8 @@
               ⤨
             </button>
           </div>
-          <button id="apply" class="apply">
-            Apply & reset <span aria-hidden="true">↻</span>
-          </button>
           <p id="setup-note" class="setup-note" aria-live="polite">
-            Evenly spaced in each lane. Ready when you are.
+            Changes reset the road instantly. Press play to begin.
           </p>
         </aside>
         <section class="experiment" aria-label="Traffic simulation">
@@ -383,14 +383,16 @@
       <ol>
         <li>
           Choose a road layout, lanes, arrival interval, driver probabilities,
-          and the shared reaction time. Probabilities must add up to 100%.
+          and the shared reaction time. Probabilities must add up to 100%, or
+          use Zero all to clear the road and stop arrivals.
         </li>
         <li>
-          Apply, then press play. Continuous-arrival roads start empty. Each
-          arriving car gets a randomly chosen personality, enters when there is
-          room, and leaves after its visible trip. Blocked entrances keep an
-          upstream queue. Fixed-car experiments remain available on loop
-          layouts.
+          Settings reset the road as you edit. Press play to start; changes
+          during playback keep the simulation running. Continuous-arrival roads
+          start empty. Each arriving car gets a randomly chosen personality,
+          enters when there is room, and leaves after its visible trip. Blocked
+          entrances keep an upstream queue. Fixed-car experiments remain
+          available on loop layouts.
         </li>
         <li>
           Brake a car for three seconds, cause a breakdown, or place an obstacle

@@ -290,8 +290,10 @@ export class Simulation {
         (a, b) => a + b,
         0,
       );
-      if (Math.abs(total - 100) > 0.01)
-        throw new Error("Driver probabilities must add up to 100%.");
+      if (total !== 0 && Math.abs(total - 100) > 0.01)
+        throw new Error(
+          "Driver probabilities must add up to 100%, or all be zero.",
+        );
       this.probabilityTotal = total;
       this.cars = [];
       this.history = Array.from({ length: 43 }, () => this.snapshot());
@@ -396,6 +398,7 @@ export class Simulation {
     );
   }
   inflow() {
+    if (!this.probabilityTotal) return;
     while (this.nextArrival <= this.time + 1e-8) {
       let draw = this.random() * this.probabilityTotal,
         type = KEYS.findLast((k) => this.config.probabilities[k] > 0);
