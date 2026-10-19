@@ -8,6 +8,7 @@ import {
   clamp,
 } from "./model.js";
 import { RoadView, drawCharts } from "./view.js";
+import { ReplayBuffer } from "./replay.js";
 const $ = (id) => document.getElementById(id);
 let initial = PRESETS.stream;
 try {
@@ -32,6 +33,11 @@ try {
 } catch {
   sim = new Simulation(PRESETS.stream);
 }
+let recording = new ReplayBuffer(),
+  liveSim = sim,
+  replaying = false,
+  replayCursor = 0;
+recording.capture(sim);
 let running = false,
   tool = "select",
   selected = null,
@@ -63,6 +69,83 @@ function toast(message) {
   $("toast").hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($("toast").hidden = true), 3800);
+}
+function recordLive() {
+  if (!replaying) recording.capture(sim, true);
+}
+function canPlay() {
+  return (
+    configurationValid &&
+    (replaying ? replayCursor < recording.end - 1e-8 : hasTraffic())
+  );
+}
+function updateReplay() {
+  const timeline = $("replay-timeline");
+  timeline.min = recording.start;
+  timeline.max = recording.end;
+  timeline.value = sim.time;
+  timeline.disabled = !configurationValid || recording.end <= recording.start;
+  timeline.setAttribute(
+    "aria-valuetext",
+    `${timeLabel(sim.time)} of ${timeLabel(recording.end)}`,
+  );
+  $("rewind").disabled =
+    timeline.disabled || sim.time <= recording.start + 1e-8;
+  $("return-live").disabled = !replaying;
+  $("replay-position").textContent = replaying
+    ? `REPLAY · ${timeLabel(sim.time)} / ${timeLabel(recording.end)}`
+    : `LIVE · ${timeLabel(sim.time)}`;
+  timeline.closest(".replay-controls").classList.toggle("replaying", replaying);
+  $("replay-note").textContent = replaying
+    ? "Live traffic is paused. Play replays the recording; Back to live returns to your paused run."
+    : "Last 3 simulated minutes. Rewind pauses live traffic; press play to watch again.";
+  document
+    .querySelectorAll(
+      '[data-tool]:not([data-tool="select"]), #vehicle-brake, #vehicle-break, #vehicle-repair, #clear, #pulse, #selection [data-action]',
+    )
+    .forEach((button) => (button.disabled = replaying));
+}
+function seekReplay(time) {
+  if (!configurationValid || recording.end <= recording.start) return;
+  if (!replaying) {
+    recordLive();
+    liveSim = sim;
+    replaying = true;
+    document.querySelector('[data-tool="select"]').click();
+  }
+  replayCursor = clamp(time, recording.start, recording.end);
+  sim = recording.at(replayCursor);
+  fleetVersion = -1;
+  setRunning(false);
+  updateHUD();
+  draw();
+}
+function returnLive() {
+  if (!replaying) return;
+  sim = liveSim;
+  replaying = false;
+  fleetVersion = -1;
+  setRunning(false);
+  updateHUD();
+  draw();
+}
+function liveEditAllowed() {
+  if (!replaying) return true;
+  toast("Use Back to live before changing traffic.");
+  return false;
+}
+function advanceReplay(seconds) {
+  replayCursor = Math.min(recording.end, replayCursor + seconds);
+  const next = recording.at(replayCursor);
+  if (next !== sim) {
+    sim = next;
+    fleetVersion = -1;
+  }
+  if (replayCursor >= recording.end - 1e-8) setRunning(false);
+}
+function advanceLive() {
+  sim.step();
+  recording.capture(sim);
 }
 function hasTraffic() {
   return sim.stream ? sim.probabilityTotal > 0 : sim.cars.length > 0;
@@ -291,19 +374,27 @@ function readConfig() {
   };
 }
 function updatePlay() {
-  $("play").disabled = !configurationValid || !hasTraffic();
-  $("step").disabled = !configurationValid;
+  $("play").disabled = !canPlay();
+  $("step").disabled = !configurationValid || (replaying && !canPlay());
   const wasStarted = sim.time > 0;
-  $("play").innerHTML = running
-    ? '<span aria-hidden="true">Ⅱ</span> Pause simulation'
-    : `<span aria-hidden="true">▶</span> ${wasStarted ? "Resume" : "Start"} simulation`;
+  $("play").innerHTML = replaying
+    ? running
+      ? '<span aria-hidden="true">Ⅱ</span> Pause replay'
+      : '<span aria-hidden="true">▶</span> Play replay'
+    : running
+      ? '<span aria-hidden="true">Ⅱ</span> Pause simulation'
+      : `<span aria-hidden="true">▶</span> ${wasStarted ? "Resume" : "Start"} simulation`;
   $("state").textContent = !configurationValid
     ? "COMPLETE SETUP"
-    : running
-      ? "EXPERIMENT RUNNING"
-      : wasStarted
-        ? "EXPERIMENT PAUSED"
-        : "READY TO ROLL";
+    : replaying
+      ? running
+        ? "REPLAY PLAYING"
+        : "REPLAY PAUSED"
+      : running
+        ? "EXPERIMENT RUNNING"
+        : wasStarted
+          ? "EXPERIMENT PAUSED"
+          : "READY TO ROLL";
   $("state-dot").classList.toggle("running", running);
 }
 function setRunning(value) {
@@ -324,6 +415,10 @@ function reset(
     return false;
   }
   sim = next;
+  liveSim = sim;
+  replaying = false;
+  recording = new ReplayBuffer();
+  recording.capture(sim);
   selected = null;
   setRunning(resume && configurationValid && hasTraffic());
   $("setup-note").classList.remove("invalid");
@@ -368,6 +463,7 @@ function draw() {
     `translate(-50%,-45%) scale(${scale})`;
 }
 function timeLabel(t) {
+  t = Math.max(0, t + 1e-8);
   return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 }
 function updateHUD() {
@@ -497,8 +593,11 @@ function updateHUD() {
       events.append(li);
     }
   drawCharts($("speed-chart"), $("wave-chart"), sim);
+  updatePlay();
+  updateReplay();
 }
 function action(kind, id) {
+  if (!liveEditAllowed()) return;
   const car = sim.cars.find((c) => c.id === id);
   if (kind === "remove" && !car) {
     sim.removeObstacle(id);
@@ -512,6 +611,7 @@ function action(kind, id) {
     else if (kind === "breakdown") sim.breakCar(id);
     else if (kind === "repair" || kind === "remove") sim.repairCar(id);
   }
+  recordLive();
   if (!running)
     toast(
       kind === "repair" || kind === "remove"
@@ -562,18 +662,24 @@ $("restart").addEventListener("click", () => {
   configurationChanged(false);
 });
 $("play").addEventListener("click", () => {
-  if (!configurationValid || !hasTraffic()) return;
+  if (!canPlay()) return;
   editPlaybackIntent = null;
   setRunning(!running);
 });
 $("step").addEventListener("click", () => {
   editPlaybackIntent = null;
   setRunning(false);
-  sim.advance(1);
+  if (replaying) advanceReplay(1);
+  else for (let i = 0; i < Math.round(1 / STEP); i++) advanceLive();
   updatePlay();
   updateHUD();
   draw();
 });
+$("rewind").addEventListener("click", () => seekReplay(sim.time - 10));
+$("replay-timeline").addEventListener("input", () =>
+  seekReplay(Number($("replay-timeline").value)),
+);
+$("return-live").addEventListener("click", returnLive);
 document.querySelectorAll("[data-tool]").forEach((button) =>
   button.addEventListener("click", () => {
     tool = button.dataset.tool;
@@ -590,6 +696,7 @@ $("road").addEventListener("pointerdown", (e) => {
     y = e.clientY - bounds.top;
   const hit = road.hit(x, y);
   if (tool === "obstacle") {
+    if (!liveEditAllowed()) return;
     const location = road.roadLocation(x, y, sim);
     if (!location) {
       toast(
@@ -600,6 +707,7 @@ $("road").addEventListener("pointerdown", (e) => {
       return;
     }
     if (sim.addObstacle(location.q, location.lane, location.approach)) {
+      recordLive();
       toast(
         running
           ? "Obstacle placed. Watch the approaching cars."
@@ -649,13 +757,16 @@ for (const [button, kind] of [
     } else action(kind, id);
   });
 $("clear").addEventListener("click", () => {
+  if (!liveEditAllowed()) return;
   sim.clearIncidents();
+  recordLive();
   selected = null;
   updateHUD();
   draw();
   toast("Incidents cleared. Give the road time to recover.");
 });
 $("pulse").addEventListener("click", () => {
+  if (!liveEditAllowed()) return;
   let car = sim.cars.find((c) => c.id === selected && !c.broken);
   if (!car)
     car = [...sim.cars].filter((c) => !c.broken).sort((a, b) => b.v - a.v)[0];
@@ -665,6 +776,7 @@ $("pulse").addEventListener("click", () => {
   }
   selected = car.id;
   sim.brakeCar(car.id);
+  recordLive();
   setRunning(true);
   updateHUD();
   toast(`Car ${car.id} is braking for 3 seconds. Follow the wave behind it.`);
@@ -696,7 +808,7 @@ window.addEventListener("keydown", (e) => {
     return;
   if (e.code === "Space") {
     e.preventDefault();
-    if (configurationValid && hasTraffic()) {
+    if (canPlay()) {
       editPlaybackIntent = null;
       setRunning(!running);
     }
@@ -722,9 +834,10 @@ function frame(now) {
   if (running && !document.hidden) {
     accumulator += delta * Number($("rate").value);
     let steps = 0;
-    while (accumulator >= STEP && steps < 20) {
-      sim.step();
-      accumulator -= STEP;
+    while (running && accumulator >= STEP && steps < 20) {
+      if (replaying) advanceReplay(STEP);
+      else advanceLive();
+      accumulator = Math.max(0, accumulator - STEP);
       steps++;
     }
     draw();
