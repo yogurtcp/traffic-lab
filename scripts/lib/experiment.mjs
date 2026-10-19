@@ -36,6 +36,19 @@ export function parseCars(text) {
   }
   return counts;
 }
+export function parseProbabilities(text) {
+  const result = Object.fromEntries(KEYS.map((k) => [k, 0]));
+  for (const entry of text.split(",")) {
+    const [key, value, ...extra] = entry.trim().split("=");
+    choice(key, "driver type", KEYS);
+    if (value === undefined || extra.length)
+      throw new Error(
+        "Use probabilities such as regular=70,slowpoke=20,stuntman=10.",
+      );
+    result[key] = number(value, `${key} probability`, 0, 100);
+  }
+  return result;
+}
 export function resolveExperiment(scenario = {}, options = {}) {
   const preset = options.preset ?? scenario.preset ?? "mixed";
   choice(preset, "preset", Object.keys(PRESETS));
@@ -47,19 +60,56 @@ export function resolveExperiment(scenario = {}, options = {}) {
     "length",
     "reaction",
     "seed",
+    "traffic",
+    "interval",
   ])
     if (options[key] !== undefined) config[key] = options[key];
   if (options.cars !== undefined) config.counts = parseCars(options.cars);
+  if (options.probabilities !== undefined)
+    config.probabilities = parseProbabilities(options.probabilities);
+  if (
+    options.traffic === undefined &&
+    (options.probabilities !== undefined || options.interval !== undefined)
+  )
+    config.traffic = "stream";
+  if (
+    options.cars !== undefined &&
+    options.traffic === undefined &&
+    options.probabilities === undefined &&
+    options.interval === undefined
+  )
+    config.traffic = "fixed";
   choice(config.layout ?? "circle", "layout", [
     "circle",
     "rectangle",
     "figure8",
+    "u",
+    "cross",
   ]);
   choice(config.intersection ?? "stop", "intersection", [
     "stop",
     "lights",
     "roundabout",
   ]);
+  choice(config.traffic ?? "fixed", "traffic", ["fixed", "stream"]);
+  number(config.interval ?? 2, "interval", 0.2, 60);
+  if (options.cars !== undefined && ["u", "cross"].includes(config.layout))
+    throw new Error(
+      "Fixed car counts need a circle, rectangle, or figure-eight. Use --probabilities for open roads.",
+    );
+  if (config.probabilities)
+    for (const [k, v] of Object.entries(config.probabilities)) {
+      choice(k, "driver type", KEYS);
+      number(v, `${k} probability`, 0, 100);
+    }
+  const normalized = normalizeConfig(config);
+  if (
+    normalized.traffic === "stream" &&
+    Math.abs(
+      Object.values(normalized.probabilities).reduce((a, b) => a + b, 0) - 100,
+    ) > 0.01
+  )
+    throw new Error("Driver probabilities must add up to 100%.");
   for (const [key, min, max, integer] of [
     ["lanes", 1, 5, true],
     ["length", 600, 2000, true],
@@ -114,7 +164,13 @@ export function resolveExperiment(scenario = {}, options = {}) {
       ]);
       const result = { ...event, at, type };
       if (["brake", "breakdown", "repair"].includes(type))
-        result.car = number(event.car, `event ${i + 1} car ID`, 1, 180, true);
+        result.car = number(
+          event.car,
+          `event ${i + 1} car ID`,
+          1,
+          1000000000,
+          true,
+        );
       if (type === "brake")
         result.duration = number(
           event.duration ?? 3,
@@ -131,6 +187,13 @@ export function resolveExperiment(scenario = {}, options = {}) {
           config.lanes,
           true,
         );
+        result.approach = number(
+          event.approach ?? 1,
+          `event ${i + 1} entrance`,
+          1,
+          config.layout === "cross" ? 4 : 1,
+          true,
+        );
       }
       if (
         type === "remove-obstacle" &&
@@ -144,7 +207,7 @@ export function resolveExperiment(scenario = {}, options = {}) {
     title: String(
       options.title ?? scenario.title ?? "Loop Lab · traffic experiment",
     ).slice(0, 160),
-    config: normalizeConfig(config),
+    config: normalized,
     duration: simulatedDuration,
     speed,
     fps,
@@ -162,7 +225,11 @@ export class ExperimentRunner {
     this.metrics = [];
     this.sampledSecond = -1;
     for (const event of experiment.events)
-      if (event.car && !this.sim.cars.some((c) => c.id === event.car))
+      if (
+        event.car &&
+        !this.sim.stream &&
+        !this.sim.cars.some((c) => c.id === event.car)
+      )
         throw new Error(
           `Event at ${event.at}s refers to car ${event.car}, which is not in this experiment.`,
         );
@@ -177,12 +244,20 @@ export class ExperimentRunner {
       const event = this.experiment.events[this.nextEvent++];
       let applied = true,
         reason;
-      if (event.type === "brake") this.sim.brakeCar(event.car, event.duration);
+      if (event.car && !this.sim.cars.some((c) => c.id === event.car)) {
+        applied = false;
+        reason = "That car is not currently on the visible road.";
+      } else if (event.type === "brake")
+        this.sim.brakeCar(event.car, event.duration);
       else if (event.type === "breakdown") this.sim.breakCar(event.car);
       else if (event.type === "repair") this.sim.repairCar(event.car);
       else if (event.type === "clear") this.sim.clearIncidents();
       else if (event.type === "obstacle") {
-        applied = this.sim.addObstacle(event.q, event.lane - 1);
+        applied = this.sim.addObstacle(
+          event.q,
+          event.lane - 1,
+          (event.approach ?? 1) - 1,
+        );
         if (!applied)
           reason =
             "The requested position is occupied or inside the shared junction.";

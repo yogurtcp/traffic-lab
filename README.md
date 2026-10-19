@@ -2,7 +2,7 @@
 
 **[Play the traffic playground](https://yogurtcp.github.io/traffic-lab/)** · [Source](https://github.com/yogurtcp/traffic-lab)
 
-A traffic-loop experiment: mix drivers, compare road layouts and intersection rules, and turn one small brake into a wave of traffic. Standalone HTML, CSS, and JavaScript, deployed to GitHub Pages like the other games. No backend or runtime packages.
+A traffic experiment: watch a section of a larger road, choose how often cars arrive and their personality probabilities, and measure how many get through. Closed-road experiments remain available. Standalone HTML, CSS, and JavaScript, deployed to GitHub Pages like the other games. No backend or runtime packages.
 
 ## Run locally
 
@@ -20,21 +20,27 @@ npm run simulate -- --scenario examples/long-arms.json --output videos/demo.mp4
 
 This creates a 30-second MP4 showing three simulated minutes at 6× speed, plus a JSON statistics report and PNG preview. Customize the road, exact driver counts, speed, seed, and timed interventions through flags or a scenario file. See [simulation CLI documentation](SIMULATIONS.md).
 
+For continuous arrivals and exit-based throughput, use `--scenario examples/open-road.json`, or pass `--layout u --interval 2 --probabilities regular=70,slowpoke=20,stuntman=10`.
+
 ## Make an experiment
 
-1. Choose a circle, rounded rectangle, or four-arm figure-eight; then choose 1–5 lanes, a 600–2,000 m base lap, and a shared 0–2 second reaction time. On the figure-eight, choose the central intersection rule.
-2. Enter the exact count of each driver type. The combined limit is 180; cars must also physically fit in their assigned lanes.
-3. **Apply & reset**, then **Start simulation**. Circle and rectangle lanes start with identical intervals between cars at their desired speeds. On the four-arm loop, cars start at rest, evenly distributed over open road with the junction kept clear. A seed makes the driver order reproducible. Left-lane hogs start in lane 1; the remaining drivers fill the least populated lanes.
+1. Start with **Continuous arrivals**, the default. Choose the sideways U, the **+ intersection**, or an existing loop. Set 1–5 lanes, a 600–2,000 m trip length, and a shared 0–2 second reaction time. Junction lane counts are per direction.
+2. Set the **seconds between new cars** (0.2–60) and each personality's **probability**. Percentages must add up to 100%; **Balance probabilities** normalizes the values while keeping zero-probability types at zero. Each car is an independent seeded draw; short runs need not match the percentages exactly.
+3. **Apply & reset**, then **Start simulation**. The road starts empty. The first arrival is scheduled when play begins, followed by fixed simulated-time intervals. The + junction chooses each of its four entrances with equal probability. The interval is global, not per lane or entrance: 2 seconds means 30 offered arrivals per minute in total. Blocked arrivals queue off-screen and enter when safe; they are never silently dropped. The status strip separates cars on the road, cumulative entries, and upstream waiting.
 4. Use **Brake** to brake a car for three seconds, **Break down** for a persistent stoppage, or **Obstacle** to close a small patch of a lane. Obstacles cannot be placed inside cars. **Remove / repair** reverses incidents, and **Clear all incidents** releases the entire road.
 5. Inspect a car for its speed, personality, following gap, and current behavior. The vehicle list offers keyboard-accessible alternatives to clicking cars.
 
+To retain exact-count experiments, choose a circle, rounded rectangle, or four-arm loop and select **Fixed cars · closed loop**. The combined limit remains 180 and cars must physically fit. Circle/rectangle cars start evenly spaced at desired speeds; the four-arm loop starts at rest with the junction clear. Switching setup modes preserves separate counts and probability mixes. A seed reproduces arrival personalities, entrances, and driver order. Existing saved setups migrate to the new arrivals mode with their old fixed counts retained for switching back.
+
 Space toggles playback when focus is outside an input or button. Escape returns to Inspect. Pause, one-second stepping, restart, and ½×–5× time controls help inspect the chain reaction. Background tabs do not accumulate simulation time. Setup is saved locally; running experiments are not saved.
 
-Presets: **Mixed company**, **Perfect flow**, **Phantom jam**, **Left-lane blockade**, and **Junction lab**. For a clear traffic-wave experiment, choose Phantom jam, apply, let it settle for 30 simulated seconds, then try the brake-pulse button. Junction lab starts with eight Regulars and one lane so the intersection rules are easy to compare; select a mode and apply to restart the same experiment.
+Presets: **Open-road arrivals** (sideways U), **Four-way arrivals** (+ junction), **Mixed company**, **Perfect flow**, **Phantom jam**, **Left-lane blockade**, and **Junction lab**. The original five presets retain fixed-count behavior. For a clear traffic-wave experiment, choose Phantom jam, apply, let it settle for 30 simulated seconds, then try the brake-pulse button. Junction lab starts with eight Regulars and one lane so the intersection rules are easy to compare; select a mode and apply to restart the same experiment.
 
 ## Layouts and junctions
 
-Circle and rounded rectangle are uninterrupted loops. The four-arm figure-eight joins four approaches with smooth outer connections and revisits the central junction four times per full lap. Lane 1 is always the leftmost lane in the direction of travel; the junction approaches have separate incoming and outgoing carriageways.
+The **sideways U** is an open, one-way road: cars enter at the upper left, follow the bend, and exit at the lower left. The **+ intersection** has four independent incoming streams and opposite exits; vehicles go straight through, without turn-choice routing. Choose all-way stop, lights, or roundabout. No departing car reappears upstream.
+
+Circle and rounded rectangle are uninterrupted loops. The four-arm figure-eight joins four approaches with smooth outer connections and revisits the central junction four times per full lap. All three retain fixed-count mode; in arrival mode each new car travels one circuit and exits at the marked gate. Lane 1 is always the leftmost lane in the direction of travel; junction approaches have separate incoming and outgoing carriageways.
 
 The four-arm layout has extended straight approaches and generous constant-radius outer turns. A taller viewport, wider lanes, and enlarged car sprites make the road easier to read. Car drawings keep a constant size for the current viewport and lane width, including in queues; the enlarged drawings can overlap without changing physical separation in the model.
 
@@ -72,9 +78,10 @@ Other ordinary personalities retain their larger merge margins and the stricter 
 ## What to watch
 
 - Average speed, cars below 30 km/h, lane changes, and speed as a percentage of the mix's desired speed.
-- **Throughput** counts every full lap travelled from each car's own starting point, including repeat laps by the same car. A car spawned just before the reference marker does not count an initial partial lap. The smaller rate is completed laps per simulated minute, averaged since reset; paused wall-clock time is excluded. Inspecting a car also shows its own completed laps.
+- **Throughput in arrival mode** counts every car that finishes its trip and exits, exactly once. The rate is exits per simulated minute, averaged since reset, so the initially empty road has a warm-up period. Offered arrivals and upstream queues do not count as throughput. Paused wall-clock time is excluded.
+- **Throughput in fixed mode** retains every full lap travelled from each car's own starting point, including repeat laps by the same car. An initial partial marker crossing does not count.
 - The speed chart holds the last two simulated minutes.
-- The road-position chart adds a row every half second, up to 240 rows. Horizontal position is progress around the ring; time runs downward. Red diagonal traces show slowdowns moving between road positions. Empty bins are pale; bins with several cars average their speed.
+- The road-position chart adds a row every half second, up to 240 rows. Horizontal position is progress through the road (or around the loop); time runs downward. At a + junction, all four approaches contribute to the same progress bins. Red traces show slowdowns; empty bins are pale, and bins with several cars average their speed.
 - Car colors identify personalities. Red rear lights indicate braking. **How it works** includes a switch to color cars by speed.
 
 ## Model and limits
@@ -83,7 +90,7 @@ This is an educational microsimulation, not a calibrated traffic forecast. Car f
 
 Integration uses a fixed 0.05 s step, independent of rendering and playback speed. Lane 1 is the leftmost lane. Circle and rectangle travel counterclockwise; their outer laps grow by `2π × 3.7 m` per lane. Right-hand lanes in the four-lobed layout have shorter offset paths, approximated by subtracting `6π × 3.7 m` per lane. Cars in different lanes share a reference-path progress coordinate; local offset geometry is an approximation outside a circle, and bend speeds are not individually calibrated. Lane changes take 1.6 seconds and reserve both lanes. Ordinary drivers require comfortable front and rear gaps. Stuntmen accept much smaller physical gaps, disregard the following driver's comfortable braking distance, and can start another change 1.8 seconds after the previous one began. They consider extra room and faster traffic even when both lane acceleration estimates call for hard braking. Vehicles are 4.5 m long; the drawing enlarges their sprites for visibility.
 
-A final safety guard prevents vehicle overlap and ordinary right-side passing, even with extreme delays or sudden obstructions. It can brake more sharply than the car-following model, so crashes are excluded. Reaction delay is therefore visible in ordinary following but can be overridden by this guard. These are closed routes without entrances, exits, trucks, weather, pedestrians, or crash physics. The optional lane-avoiding behavior around incidents uses delayed information, while the final merge safety check uses current positions. Junction reservations prevent conflicting approaches entering together; the controls are simplified experiments, not calibrated intersection engineering models.
+A final safety guard prevents physical vehicle overlap and ordinary right-side passing, even with extreme delays or sudden obstructions. It can brake more sharply than the car-following model, so crashes are excluded. Reaction delay is therefore visible in ordinary following but can be overridden by this guard. Open roads use finite progress, route-specific following, persistent upstream queues, and single departures. Up to 180 cars can be visible; further demand waits upstream. The + junction's drawn width is exaggerated for readability, so its controlled section is parametrized as 40 physical metres rather than scaling with the whole trip. Sideways-U inner lanes shorten by `π × 3.7 m` per lane. Beyond the entry queues and unconstrained exits, upstream/downstream roads are not simulated. There are no trucks, weather, pedestrians, turning choices, or crash physics. Junction controls remain simplified experiments rather than calibrated capacity estimates.
 
 ## Checks and deployment
 
@@ -104,12 +111,15 @@ Deployment requires Git and authenticated GitHub CLI. Push source to `main`, the
 - `src/model.js` — deterministic simulation, delayed perception, driver traits, lane changes, interventions, statistics.
 - `src/view.js` — Canvas road, vehicles, hit testing, speed and road-position charts.
 - `src/route.js` — closed reference paths, smooth curves, junction markers, and spawn placement.
+- `src/open-route.js` — finite sideways-U and four-approach junction paths.
 - `src/junction.js` — stop ordering, signal phases, circulating priority, conflict reservations, and stop-line guards.
 - `src/app.js` — setup, playback, persistent preferences, pointer and keyboard controls.
 - `src/style.css` — responsive interface.
 - `tests/model.test.js` — model regression checks using Node's built-in test runner.
 - `tests/routes.test.js` — geometry, pointer placement, full-lap throughput, and intersection behavior/conflict checks.
 - `tests/cli.test.js` — scenario validation, deterministic interventions, metrics, and CLI output protection.
+- `tests/stream.test.js` — arrivals, probabilities, upstream conservation/recovery, single exits, finite geometry, approach isolation, and controlled open junctions.
 - `scripts/simulate.mjs`, `scripts/lib/` — command-line experiments and MP4/JSON/PNG export.
 - `examples/long-arms.json` — reproducible three-minute video scenario.
+- `examples/open-road.json` — continuous-arrival + junction video scenario.
 - `scripts/build.mjs`, `scripts/deploy.mjs` — standalone static build and GitHub Pages deployment.

@@ -212,7 +212,13 @@ export async function renderVideo(
         );
         at += 42 * fontScale;
       };
-      metric("COMPLETED LAPS", stats.completedLaps, "including repeat laps");
+      metric(
+        sim.stream ? "CARS THROUGH" : "COMPLETED LAPS",
+        sim.stream ? stats.completedTrips : stats.completedLaps,
+        sim.stream
+          ? `${stats.throughputPerMinute.toFixed(1)} cars/min`
+          : "including repeat laps",
+      );
       metric("AVERAGE SPEED", Math.round(stats.average), "km/h");
       metric("SLOW TRAFFIC", stats.slow, `/ ${sim.cars.length} cars`);
       label(
@@ -222,18 +228,27 @@ export async function renderVideo(
       ctx.fillStyle = "#586f4d";
       const control = sim.route.entries.length
         ? sim.junction.label(sim.time)
-        : "Uninterrupted loop";
+        : sim.stream
+          ? `Every ${sim.config.interval}s · ${stats.upstream} upstream`
+          : "Uninterrupted loop";
       ctx.fillText(control, x + 18, at, w - 36);
       at += 24 * fontScale;
       label("THE DRIVER MIX");
       for (const [key, p] of Object.entries(PERSONALITIES)) {
-        const count = sim.config.counts[key];
+        const count = sim.stream
+          ? sim.config.probabilities[key]
+          : sim.config.counts[key];
         if (!count) continue;
         ctx.fillStyle = p.color;
         ctx.fillRect(x + 18, at - 8, 9, 9);
         ctx.fillStyle = "#53664b";
         ctx.font = `${Math.round(11 * fontScale)}px sans-serif`;
-        ctx.fillText(`${count}  ${p.name}`, x + 36, at, w - 50);
+        ctx.fillText(
+          `${count}${sim.stream ? "%" : ""}  ${p.name}`,
+          x + 36,
+          at,
+          w - 50,
+        );
         at += 19 * fontScale;
       }
       if (at + 150 < y + roadHeight) {

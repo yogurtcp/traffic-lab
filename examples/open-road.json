@@ -1,0 +1,19 @@
+{
+  "title": "A window onto a larger road · continuous arrivals",
+  "preset": "crossing",
+  "config": {
+    "layout": "cross",
+    "intersection": "lights",
+    "lanes": 2,
+    "length": 1000,
+    "reaction": 0.9,
+    "seed": 42,
+    "interval": 1.5,
+    "probabilities": { "regular": 70, "slowpoke": 20, "stuntman": 10 }
+  },
+  "duration": 120,
+  "speed": 6,
+  "fps": 24,
+  "width": 1280,
+  "height": 960
+}

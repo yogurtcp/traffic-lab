@@ -1218,8 +1218,36 @@ dialog a {
   font-weight: 600;
   color: #5e7550;
 }
-.road-view[data-layout="figure8"] .center-readout {
+.road-view[data-layout="figure8"] .center-readout,
+.road-view[data-layout="cross"] .center-readout,
+.road-view[data-layout="u"] .center-readout {
   display: none;
+}
+.arrival-input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fafbf6;
+  color: var(--ink);
+  font: inherit;
+}
+.normalize-mix {
+  font-size: 10px;
+  margin-top: 8px;
+}
+.total-pill.invalid {
+  color: #af4c3c;
+  background: #f9e7df;
+}
+.probability-unit {
+  display: none;
+  font-size: 10px;
+  color: #7b8871;
+  margin-right: 4px;
+}
+.probability .probability-unit {
+  display: inline;
 }
 @media (max-width: 400px) {
   .beta {

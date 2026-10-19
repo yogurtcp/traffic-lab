@@ -12,7 +12,15 @@ export class Junction {
   }
   next(car) {
     return this.route.entries
-      .map((e) => ({ ...e, distance: wrap(e.q - car.q) }))
+      .filter(
+        (e) =>
+          this.route.layout !== "cross" ||
+          (e.approach === (car.approach ?? 0) && car.q <= e.exitQ),
+      )
+      .map((e) => ({
+        ...e,
+        distance: this.route.closed ? wrap(e.q - car.q) : e.q - car.q,
+      }))
       .sort((a, b) => a.distance - b.distance)[0];
   }
   get mode() {
@@ -43,8 +51,13 @@ export class Junction {
     const candidates = [];
     for (const car of sim.cars) {
       if (this.reservations.has(car.id)) continue;
-      const entry = this.next(car),
-        distance = entry.distance * sim.laneLength(car.lane) - HALF_CAR - 1;
+      const entry = this.next(car);
+      if (!entry) {
+        this.arrivals.delete(car.id);
+        this.stops.delete(car.id);
+        continue;
+      }
+      const distance = entry.distance * sim.laneLength(car.lane) - HALF_CAR - 1;
       if (distance > 50) {
         this.arrivals.delete(car.id);
         this.stops.delete(car.id);
@@ -88,13 +101,18 @@ export class Junction {
       const exitCars = sim.cars.filter(
         (c) =>
           c.id !== car.id &&
+          sim.sameRoad(car, c) &&
           sim.occupied(c, car.lane) &&
-          wrap(c.q - entry.exitQ) * sim.laneLength(car.lane) < 10,
+          (this.route.closed ? wrap(c.q - entry.exitQ) : c.q - entry.exitQ) >=
+            0 &&
+          (this.route.closed ? wrap(c.q - entry.exitQ) : c.q - entry.exitQ) *
+            sim.laneLength(car.lane) <
+            10,
       );
       if (exitCars.some((c) => c.v < 1)) continue;
       const releaseAt =
         car.travelled +
-        wrap(entry.exitQ - car.q) +
+        (this.route.closed ? wrap(entry.exitQ - car.q) : entry.exitQ - car.q) +
         (HALF_CAR + 1) / sim.laneLength(car.lane);
       this.reservations.set(car.id, {
         axis: entry.axis,
@@ -109,8 +127,9 @@ export class Junction {
   gate(car, sim) {
     if (!this.route.entries.length || this.reservations.has(car.id))
       return null;
-    const entry = this.next(car),
-      distance = entry.distance * sim.laneLength(car.lane) - HALF_CAR - 1;
+    const entry = this.next(car);
+    if (!entry) return null;
+    const distance = entry.distance * sim.laneLength(car.lane) - HALF_CAR - 1;
     if (
       this.mode === "lights" &&
       this.phase?.stage === "green" &&
@@ -122,29 +141,34 @@ export class Junction {
     return {
       ...entry,
       gap: Math.max(0, distance),
-      q: wrap(entry.q - (HALF_CAR + 1) / sim.laneLength(car.lane)),
+      q: this.route.closed
+        ? wrap(entry.q - (HALF_CAR + 1) / sim.laneLength(car.lane))
+        : entry.q - (HALF_CAR + 1) / sim.laneLength(car.lane),
     };
   }
   canChangeLane(car, sim) {
     if (!this.route.entries.length) return true;
+    const entry = this.next(car);
+    if (!entry) return !this.reservations.has(car.id);
     return (
       !this.reservations.has(car.id) &&
       !this.route.inside(car.q) &&
-      this.next(car).distance * sim.laneLength(car.lane) >
-        Math.max(35, car.v * 3)
+      entry.distance * sim.laneLength(car.lane) > Math.max(35, car.v * 3)
     );
   }
   inApproachQueue(car, sim) {
     return (
       this.route.entries.length > 0 &&
       car.v * 3.6 <= 70.5 &&
+      !!this.next(car) &&
       this.next(car).distance * sim.laneLength(car.lane) < 65
     );
   }
   speedLimit(car, sim) {
     if (!this.route.entries.length) return Infinity;
-    const entry = this.next(car),
-      near = entry.distance * sim.laneLength(car.lane) < 70;
+    const entry = this.next(car);
+    if (!entry) return Infinity;
+    const near = entry.distance * sim.laneLength(car.lane) < 70;
     if (!near && !this.reservations.has(car.id)) return Infinity;
     return (
       (this.mode === "stop" ? 25 : this.mode === "roundabout" ? 35 : 45) / 3.6

@@ -30,7 +30,10 @@
         <div>
           <p class="eyebrow">THE TRAFFIC PLAYGROUND</p>
           <h1>Meet your next traffic jam.</h1>
-          <p>One endless road. Eight kinds of driver. See what happens.</p>
+          <p>
+            A window onto a busy road. Eight kinds of driver. See what gets
+            through.
+          </p>
         </div>
         <a
           class="source-link"
@@ -48,6 +51,8 @@
           </div>
           <label class="field-label" for="preset">Start with a scenario</label>
           <select id="preset">
+            <option value="stream">Open-road arrivals · sideways U</option>
+            <option value="crossing">Four-way arrivals · traffic lights</option>
             <option value="mixed">Mixed company</option>
             <option value="perfect">Perfect flow</option>
             <option value="wave">Phantom jam</option>
@@ -56,11 +61,35 @@
             <option value="custom" hidden>Custom experiment</option>
           </select>
           <div class="layout-settings">
+            <label class="field-label" for="traffic">Traffic setup</label>
+            <select id="traffic">
+              <option value="stream">Continuous arrivals</option>
+              <option value="fixed">Fixed cars · closed loop</option>
+            </select>
+            <div id="arrival-settings">
+              <label class="field-label" for="interval"
+                >Seconds between new cars</label
+              >
+              <input
+                id="interval"
+                class="arrival-input"
+                type="number"
+                min="0.2"
+                max="60"
+                step="0.1"
+                value="2"
+              />
+              <p id="arrival-note" class="small-copy">
+                One car every 2 seconds, across all entrances.
+              </p>
+            </div>
             <label class="field-label" for="layout">Road layout</label>
             <select id="layout">
               <option value="circle">Circle</option>
               <option value="rectangle">Rounded rectangle</option>
               <option value="figure8">Figure-eight / four-arm loop</option>
+              <option value="u">Sideways U · entrance → exit</option>
+              <option value="cross">+ intersection · four entrances</option>
             </select>
             <label class="field-label" for="intersection"
               >Central intersection</label
@@ -86,7 +115,8 @@
               <input type="hidden" id="lanes" value="3" />
             </div>
             <div class="range-heading">
-              <label class="field-label" for="length">Base lap length</label
+              <label class="field-label" id="length-label" for="length"
+                >Road length</label
               ><output id="length-value">1,000 m</output>
             </div>
             <input
@@ -117,10 +147,17 @@
           </div>
           <div class="section-heading driver-heading">
             <h2>The driver mix</h2>
-            <span class="total-pill"><b id="total">54</b> cars</span>
+            <span class="total-pill"
+              ><b id="total">100</b><span id="total-unit">%</span></span
+            >
           </div>
-          <p class="small-copy">Choose exactly who gets on the road.</p>
+          <p id="mix-note" class="small-copy">
+            Chance of each personality for every arriving car.
+          </p>
           <div id="drivers" class="drivers"></div>
+          <button id="normalize-probabilities" class="quiet normalize-mix">
+            Balance probabilities to 100%
+          </button>
           <div class="seed-row">
             <label for="seed">Shuffle seed</label
             ><input
@@ -187,6 +224,7 @@
               </div>
             </div>
             <div id="junction-status" class="junction-status" hidden></div>
+            <div id="flow-status" class="junction-status" hidden></div>
             <div class="transport">
               <div>
                 <button id="play" class="play">
@@ -230,7 +268,10 @@
               title="Full laps travelled from each car's starting point. Repeat laps by the same car count again."
             >
               <span>THROUGHPUT</span>
-              <p><b id="stat-laps">0</b><small>full laps</small></p>
+              <p>
+                <b id="stat-laps">0</b
+                ><small id="throughput-unit">cars through</small>
+              </p>
               <em id="stat-throughput">0.0 laps/min · average</em>
             </div>
             <div class="stat">
@@ -341,14 +382,15 @@
       <h3>Run your own experiment</h3>
       <ol>
         <li>
-          Choose a road layout, lanes, driver counts, and the shared reaction
-          time.
+          Choose a road layout, lanes, arrival interval, driver probabilities,
+          and the shared reaction time. Probabilities must add up to 100%.
         </li>
         <li>
-          Apply, then press play. Cars begin evenly spaced within each lane, at
-          their personality’s desired speed on uninterrupted loops. On the
-          four-arm layout, cars start at rest and are evenly spaced over open
-          road, keeping the junction clear.
+          Apply, then press play. Continuous-arrival roads start empty. Each
+          arriving car gets a randomly chosen personality, enters when there is
+          room, and leaves after its visible trip. Blocked entrances keep an
+          upstream queue. Fixed-car experiments remain available on loop
+          layouts.
         </li>
         <li>
           Brake a car for three seconds, cause a breakdown, or place an obstacle
@@ -375,6 +417,12 @@
       </p>
       <h3>Roads, junctions, and throughput</h3>
       <p>
+        The sideways U has an entrance at the upper left and an exit at the
+        lower left. The + junction has four entrances, with cars travelling to
+        the opposite exit. The arrival interval is the total flow, shared across
+        all entrances. Lane counts at a junction are per direction.
+      </p>
+      <p>
         The figure-eight is a four-arm crossing joined by curved outer loops.
         Choose an all-way stop, traffic lights, or a roundabout. All-way stops
         take turns in arrival order after a complete stop. Lights alternate
@@ -390,10 +438,10 @@
         blocks it until repaired.
       </p>
       <p>
-        Throughput counts every completed lap travelled from a car’s starting
-        point. The same car can contribute many laps. The rate is completed laps
-        per simulated minute, averaged since the last reset. Partial laps at
-        startup do not count.
+        In arrival mode, throughput counts cars that exit the visible road, once
+        per car. The rate is cars per simulated minute, averaged since reset.
+        Paused time does not count. In fixed-car mode, throughput still counts
+        full laps, including repeat laps by the same car.
       </p>
       <h3>A model, with limits</h3>
       <p>

@@ -11,9 +11,12 @@ const help = `Loop Lab simulation CLI
 
 Options:
   --scenario PATH       JSON scenario, including optional timed interventions
-  --preset NAME         mixed, perfect, wave, hogs, or junction
-  --layout NAME         circle, rectangle, figure8
-  --intersection NAME   stop, lights, roundabout (figure8 only)
+  --preset NAME         stream, crossing, mixed, perfect, wave, hogs, junction
+  --layout NAME         circle, rectangle, figure8, u, cross
+  --traffic MODE        stream (arrivals/exits) or fixed (closed-road counts)
+  --interval SECONDS    Seconds between arrivals; 0.2–60, total across entrances
+  --probabilities MIX   Percentages adding to 100, e.g. regular=70,slowpoke=30
+  --intersection NAME   stop, lights, roundabout (figure8 or cross)
   --cars TYPE=COUNT,...  Exact mix; unspecified driver types have zero cars
   --lanes N             1–5 lanes
   --length METRES       600–2000 m base lap
@@ -39,6 +42,9 @@ async function main() {
     "layout",
     "intersection",
     "cars",
+    "traffic",
+    "interval",
+    "probabilities",
     "lanes",
     "length",
     "reaction",
@@ -99,7 +105,7 @@ async function main() {
   }
   const stats = runner.sim.stats;
   console.log(
-    `${runner.sim.time.toFixed(1)} simulated seconds · ${stats.completedLaps} full laps · ${stats.throughputPerMinute.toFixed(2)} laps/min · ${stats.average.toFixed(1)} km/h average`,
+    `${runner.sim.time.toFixed(1)} simulated seconds · ${runner.sim.stream ? stats.completedTrips + " cars through" : stats.completedLaps + " full laps"} · ${stats.throughputPerMinute.toFixed(2)} ${runner.sim.stream ? "cars" : "laps"}/min · ${stats.average.toFixed(1)} km/h average`,
   );
   for (const event of runner.eventResults.filter((e) => !e.applied))
     console.warn(`Skipped ${event.type} at ${event.at}s: ${event.reason}`);

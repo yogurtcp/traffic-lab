@@ -1,3 +1,4 @@
+import { getOpenRoute } from "./open-route.js";
 const tau = Math.PI * 2;
 const wrap = (v) => ((v % 1) + 1) % 1;
 const cache = new Map();
@@ -10,9 +11,18 @@ export const FIGURE8_GEOMETRY = {
 
 // One continuous reference path. The four-lobed layout visits a four-arm
 // crossing from west, south, east, and north, in that order each lap.
-export function getRoute(layout = "circle", intersection = "stop") {
-  const key = `${layout}:${intersection}`;
+export function getRoute(
+  layout = "circle",
+  intersection = "stop",
+  length = 1000,
+) {
+  const key = `${layout}:${intersection}${layout === "cross" ? ":" + length : ""}`;
   if (cache.has(key)) return cache.get(key);
+  if (layout === "u" || layout === "cross") {
+    const route = getOpenRoute(layout, intersection, length);
+    cache.set(key, route);
+    return route;
+  }
   const points = [],
     markers = [];
   const add = (x, y) => points.push({ x, y });
@@ -140,6 +150,8 @@ export function getRoute(layout = "circle", intersection = "stop") {
     exitQ: lengths[m.exitIndex] / total,
   }));
   const route = {
+    closed: true,
+    approaches: 1,
     layout,
     intersection,
     points,

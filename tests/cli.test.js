@@ -6,9 +6,82 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   parseCars,
+  parseProbabilities,
   resolveExperiment,
   ExperimentRunner,
 } from "../scripts/lib/experiment.mjs";
+
+test("stream CLI accepts probability mixes and rejects invalid intervals and totals", () => {
+  assert.equal(parseProbabilities("regular=67.5,slowpoke=32.5").regular, 67.5);
+  const e = resolveExperiment(
+    {},
+    {
+      layout: "cross",
+      interval: "1.5",
+      probabilities: "regular=70,slowpoke=30",
+      intersection: "lights",
+    },
+  );
+  assert.equal(e.config.traffic, "stream");
+  assert.equal(e.config.interval, 1.5);
+  assert.equal(e.config.probabilities.stuntman, 0);
+  assert.throws(
+    () => resolveExperiment({}, { layout: "u", probabilities: "regular=20" }),
+    /100%/,
+  );
+  assert.throws(() => resolveExperiment({}, { interval: "0" }), /interval/);
+  assert.throws(
+    () => resolveExperiment({}, { layout: "u", cars: "regular=5" }),
+    /Fixed car counts/,
+  );
+});
+test("stream CLI exports exit-based metrics and reports interventions on absent cars", () => {
+  const directory = mkdtempSync(join(tmpdir(), "loop-stream-cli-")),
+    output = join(directory, "run.json");
+  try {
+    const result = execFileSync(
+      process.execPath,
+      [
+        "scripts/simulate.mjs",
+        "--layout",
+        "u",
+        "--probabilities",
+        "regular=100",
+        "--interval",
+        "20",
+        "--duration",
+        "100",
+        "--length",
+        "600",
+        "--no-video",
+        "--output",
+        output,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.match(result, /cars through/);
+    const report = JSON.parse(readFileSync(output, "utf8"));
+    assert.equal(report.config.traffic, "stream");
+    assert.ok(report.final.completedTrips >= 3);
+    assert.equal(report.final.completedLaps, 0);
+    assert.equal(
+      report.final.entered,
+      report.final.active + report.final.completedTrips,
+    );
+    const runner = new ExperimentRunner(
+      resolveExperiment({
+        config: { ...report.config },
+        duration: 1,
+        events: [{ at: 0, type: "brake", car: 999 }],
+      }),
+    );
+    runner.advanceTo(1);
+    assert.equal(runner.eventResults[0].applied, false);
+    assert.match(runner.eventResults[0].reason, /visible road/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("CLI car mixes use exact counts and reject unknown or malformed driver types", () => {
   const cars = parseCars("regular=20,slowpoke=4,stuntman=2");
