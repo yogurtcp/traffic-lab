@@ -304,6 +304,7 @@ export class Simulation {
     this.safetyInterventions = 0;
     this.events = [];
     this.history = [];
+    this.entryObservations = new Map();
     this.queueCache = new WeakMap();
     this.samples = [];
     this.nextObstacle = 1;
@@ -458,6 +459,8 @@ export class Simulation {
               { length: this.config.lanes },
               (_, i) => this.config.lanes - 1 - i,
             );
+      const state = this.snapshot();
+      const candidates = [];
       for (const lane of lanes) {
         const car = {
           ...arrival,
@@ -477,20 +480,57 @@ export class Simulation {
           distance: 0,
           safety: false,
         };
-        const n = this.neighbors(car, lane);
-        const speed = Math.min(this.desiredSpeed(car), n.front?.v ?? Infinity);
-        if (
-          n.gap < Math.max(6, speed * 0.5) ||
-          n.backGap < Math.max(6, (n.rear?.v ?? 0) * 0.5)
-        )
-          continue;
-        car.v = speed;
-        this.cars.push(car);
-        queue.shift();
-        this.entered++;
-        this.fleetVersion++;
-        break;
+        const n = this.neighbors(car, lane, state);
+        if (n.gap < 6 || n.backGap < 6) continue;
+        const target = this.desiredSpeed(car);
+        // Admit at a pace the actual following model can sustain, including
+        // room to react to a slower leader. A distant slow car must not set
+        // our entry speed regardless of the hundreds of metres between us.
+        const entryAcceleration = (speed) => {
+          car.v = speed;
+          const projectedGap =
+            n.gap -
+            Math.max(0, speed - (n.front?.v ?? speed)) * this.config.reaction;
+          return Math.min(
+            this.acceleration(car, lane, state),
+            this.followingAcceleration(car, n.front, projectedGap),
+          );
+        };
+        if (entryAcceleration(target) < -1e-9) {
+          let lo = 0,
+            hi = target;
+          for (let i = 0; i < 14; i++) {
+            const mid = (lo + hi) / 2;
+            if (entryAcceleration(mid) >= 0) lo = mid;
+            else hi = mid;
+          }
+          car.v = lo;
+        } else car.v = target;
+        if (n.rear) {
+          const closing = Math.max(0, n.rear.v - car.v);
+          const projectedGap = n.backGap - closing * this.config.reaction;
+          if (
+            projectedGap < 6 ||
+            this.followingAcceleration(n.rear, { v: car.v }, projectedGap) <
+              -0.2
+          )
+            continue;
+        }
+        candidates.push(car);
       }
+      if (!candidates.length) continue;
+      const fastest = Math.max(...candidates.map((car) => car.v));
+      // Keep the personality's lane preference when paces are comparable;
+      // otherwise use the clear/faster lane instead of manufacturing a queue.
+      const car = candidates.find((car) => car.v >= fastest - 2 / 3.6);
+      this.cars.push(car);
+      queue.shift();
+      this.entered++;
+      this.fleetVersion++;
+      // Until this driver appears in the delayed history, hold a coherent
+      // entry-time view. Mixing its current position with an older leader
+      // position invents a short gap and triggers artificial hard braking.
+      this.entryObservations.set(car.id, this.snapshot());
     }
   }
   neighbors(car, lane, state = this) {
@@ -888,6 +928,13 @@ export class Simulation {
       }
     }
   }
+  perceivedState(car, delayed) {
+    if (delayed.cars.some((c) => c.id === car.id)) {
+      this.entryObservations.delete(car.id);
+      return delayed;
+    }
+    return this.entryObservations.get(car.id) ?? this.snapshot();
+  }
   step(dt = STEP) {
     if (Math.abs(dt - STEP) > 1e-8)
       throw new Error("Use the fixed 0.05-second simulation step.");
@@ -900,17 +947,21 @@ export class Simulation {
           this.history.length - 1 - Math.round(this.config.reaction / STEP),
         )
       ];
+    const perceptions = new Map(
+      this.cars.map((car) => [car.id, this.perceivedState(car, delayed)]),
+    );
     for (const c of this.cars) {
       c.cooldown -= dt;
-      this.considerLane(c, delayed);
+      this.considerLane(c, perceptions.get(c.id));
     }
     const liveQueues = this.obstructionQueues();
     const moves = new Map();
     for (const car of this.cars) {
-      const old = delayed.cars.find((c) => c.id === car.id) ?? car;
-      let a = this.acceleration(old, car.lane, delayed);
+      const perceived = perceptions.get(car.id);
+      const old = perceived.cars.find((c) => c.id === car.id) ?? car;
+      let a = this.acceleration(old, car.lane, perceived);
       if (car.target !== null)
-        a = Math.min(a, this.acceleration(old, car.target, delayed));
+        a = Math.min(a, this.acceleration(old, car.target, perceived));
       const gate = this.junction.gate(car, this);
       if (gate)
         a = Math.min(a, this.followingAcceleration(old, { v: 0 }, gate.gap));
@@ -1041,6 +1092,7 @@ export class Simulation {
       const leaving = this.cars.filter((c) => c.travelled >= 1 - 1e-9);
       if (leaving.length) {
         this.exited += leaving.length;
+        for (const car of leaving) this.entryObservations.delete(car.id);
         this.cars = this.cars.filter((c) => c.travelled < 1 - 1e-9);
         this.fleetVersion++;
       }
