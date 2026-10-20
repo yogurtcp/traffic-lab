@@ -288,15 +288,23 @@ test("slowpokes do not attempt to pass equal-speed or faster moving leaders", ()
     );
   }
 });
-test("a slowpoke can still pass genuinely slower traffic, including after matching its speed", () => {
+test("slowpokes do not pass a faster cruising driver after matching its temporary slowdown", () => {
   for (const followerSpeed of [70, 50]) {
     const { sim, car } = passingScenario("slowpoke", followerSpeed, 50);
     sim.considerLane(car, sim.snapshot());
-    assert.equal(car.target, 0);
+    assert.equal(car.target, null);
   }
 });
+test("a slowpoke still bypasses a broken-down faster driver", () => {
+  const { sim, car, lead } = passingScenario("slowpoke", 50, 0);
+  lead.broken = true;
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+});
 test("a passing lane must offer a useful speed advantage", () => {
-  const { sim, car } = passingScenario("regular", 90, 65);
+  const { sim, car, lead } = passingScenario("regular", 90, 65);
+  lead.type = "slowpoke";
+  assert.equal(sim.canOvertake(car, lead), true);
   const leftLeader = {
     ...sim.cars.find((c) => c.id !== car.id),
     id: 999,

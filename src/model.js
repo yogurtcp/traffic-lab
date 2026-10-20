@@ -715,6 +715,27 @@ export class Simulation {
         )
     );
   }
+  canOvertake(car, leader, requireClosing = true) {
+    if (!leader || leader.obstacle || leader.broken) return false;
+    const live = this.cars.find((c) => c.id === leader.id);
+    if (!live) return false;
+    // A brief brake or a favourable variance swing is not a lasting passing
+    // advantage. Compare both cruising intent and the current target; do not
+    // pull out behind someone who is already moving away in the live state.
+    const ownPace = Math.min(
+      this.desiredSpeed(car),
+      PERSONALITIES[car.type].speed / 3.6,
+    );
+    const leaderPace = Math.max(
+      live.v,
+      this.desiredSpeed(live),
+      PERSONALITIES[live.type].speed / 3.6,
+    );
+    return (
+      ownPace > leaderPace + 2 / 3.6 &&
+      (!requireClosing || car.v + 0.05 >= live.v)
+    );
+  }
   considerLane(car, delayed) {
     if (
       car.target !== null ||
@@ -734,7 +755,7 @@ export class Simulation {
       front &&
       gap < passingRange &&
       front.v * 3.6 <= 70.5 &&
-      front.v + passMargin < desiredSpeed;
+      this.canOvertake(car, front, false);
     const obstruction =
       front &&
       (front.obstacle ||
@@ -747,13 +768,14 @@ export class Simulation {
       gap < lookAhead &&
       (obstruction ||
         (front.v * 3.6 <= 70.5 &&
-          front.v + passMargin < desiredSpeed &&
+          this.canOvertake(car, front) &&
           front.v <= old.v + 0.05));
     let choices = [];
     if (car.type === "hog") {
       if (car.lane > 0) choices = [car.lane - 1];
       else if (obstruction && blocked) choices = [car.lane + 1];
     } else if (car.type === "stuntman") {
+      if (front && !obstruction && !this.canOvertake(car, front)) return;
       const current = this.acceleration(old, car.lane, delayed);
       choices = [car.lane - 1, car.lane + 1]
         .filter((l) => l >= 0 && l < this.config.lanes)
@@ -801,7 +823,7 @@ export class Simulation {
             !this.junction.inApproachQueue(vehicle, this) &&
             left.gap < passingRange &&
             vehicle.v * 3.6 <= 70.5 &&
-            vehicle.v + passMargin < desiredSpeed &&
+            this.canOvertake(car, vehicle) &&
             (vehicle.v * this.laneLength(car.lane)) / this.laneLength(lane) <=
               old.v + 0.05
           ) {
@@ -842,7 +864,16 @@ export class Simulation {
           right.front && right.gap < passingRange
             ? right.front.v
             : desiredSpeed;
-        if (right.gap > clearRoad && rightPace + passMargin >= desiredSpeed)
+        const giveUpPass =
+          right.front &&
+          !right.front.obstacle &&
+          !right.front.broken &&
+          !this.obstructionQueues(delayed)[car.lane + 1].has(right.front.id) &&
+          !this.canOvertake(car, right.front, false);
+        if (
+          right.gap > clearRoad &&
+          (giveUpPass || rightPace + passMargin >= desiredSpeed)
+        )
           choices.push(car.lane + 1);
       }
     }
