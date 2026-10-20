@@ -583,11 +583,13 @@ function updateHUD() {
           ? "↔ Changing lanes"
           : car.safety
             ? "Emergency safety brake"
-            : car.a < -0.5
-              ? "Braking"
-              : car.a > 0.2
-                ? "Accelerating"
-                : "Cruising";
+            : car.yieldFor != null
+              ? "Making room for a merge"
+              : car.a < -0.5
+                ? "Braking"
+                : car.a > 0.2
+                  ? "Accelerating"
+                  : "Cruising";
     card.querySelector("p").textContent =
       `${Math.round(car.v * 3.6)} km/h · target ${(sim.desiredSpeed(car) * 3.6).toFixed(1)} · base ${p.speed} · lane ${car.lane + 1}\n${Number.isFinite(n.gap) ? Math.max(0, n.gap).toFixed(1) + " m to next vehicle" : "Open road ahead"}\n${status}${sim.stream ? " · " + Math.round(car.q * 100) + "% through road" : " · " + car.laps + " full laps"}`;
     card.querySelector("#vehicle-variance").value = sim.variance(car);
