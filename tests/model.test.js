@@ -413,8 +413,10 @@ test("regular left merges still allow for a faster follower closing during react
   const { sim, car } = leftMergeScenario(110, 90, 2, 80);
   assert.equal(sim.safeLane(car, 0), false);
 });
-test("regulars use a smaller left-merge gap with only comfortable follower braking", () => {
-  const { sim, car, rear } = leftMergeScenario(90, 38, 0.9, 80);
+test("regulars wait for a tight gap and merge into 50 metres with gentle follower braking", () => {
+  const tight = leftMergeScenario(90, 38, 0.9, 80);
+  assert.equal(tight.sim.safeLane(tight.car, 0), false);
+  const { sim, car, rear } = leftMergeScenario(90, 50, 0.9, 80);
   sim.considerLane(car, sim.snapshot());
   assert.equal(car.target, 0);
   let hardest = 0;
@@ -423,11 +425,11 @@ test("regulars use a smaller left-merge gap with only comfortable follower braki
     hardest = Math.min(hardest, rear.a);
     checkSafe(sim);
   }
-  assert.ok(hardest >= -2.5, `following driver braked at ${hardest} m/s²`);
+  assert.ok(hardest >= -1.5, `following driver braked at ${hardest} m/s²`);
 });
 test("regulars return right into everyday gaps and still reject a close fast follower", () => {
   for (const [rearSpeed, rearGap, accepted] of [
-    [90, 38, true],
+    [90, 50, true],
     [110, 20, false],
   ]) {
     const { sim, car, rear } = leftMergeScenario(rearSpeed, rearGap);
@@ -436,7 +438,7 @@ test("regulars return right into everyday gaps and still reject a close fast fol
     Object.assign(lead, {
       lane: 1,
       from: 1,
-      q: car.q + (30 + CAR_LENGTH) / sim.laneLength(1),
+      q: car.q + (50 + CAR_LENGTH) / sim.laneLength(1),
       v: 25,
       type: "regular",
     });
@@ -455,11 +457,11 @@ test("regulars return right into everyday gaps and still reject a close fast fol
       hardest = Math.min(hardest, rear.a);
       checkSafe(sim);
     }
-    assert.ok(hardest >= -2.5, `following driver braked at ${hardest} m/s²`);
+    assert.ok(hardest >= -1.5, `following driver braked at ${hardest} m/s²`);
   }
 });
-test("regulars can merge in crawling traffic with five metres ahead and eight behind", () => {
-  const { sim, car, rear } = leftMergeScenario(10, 8, 0.9, 20);
+test("regulars merge in crawling traffic with room for the follower to react gently", () => {
+  const { sim, car, rear } = leftMergeScenario(10, 20, 0.9, 20);
   car.v = 10 / 3.6;
   sim.cars.find((c) => c.type === "slowpoke").v = 0;
   sim.cars.push({
@@ -615,10 +617,25 @@ test("a left-lane obstacle cannot deadlock every lane of regular traffic", () =>
       config({ regular: 36 }, { lanes, reaction: 0.9 }),
     );
     assert.equal(sim.addObstacle(0.04, 0), true);
-    sim.advance(90);
+    const blockedLane = new Set(
+      sim.cars.filter((c) => c.lane === 0).map((c) => c.id),
+    );
+    sim.advance(30);
+    for (let i = 0; i < 4; i++) {
+      const before = sim.cars.reduce((sum, c) => sum + c.distance, 0);
+      sim.advance(15);
+      const progress =
+        sim.cars.reduce((sum, c) => sum + c.distance, 0) - before;
+      assert.ok(
+        progress > 500,
+        `${lanes} lanes must keep moving through the bottleneck`,
+      );
+    }
     assert.ok(sim.stats.average > 15, `${lanes} lanes must retain useful flow`);
-    assert.ok(sim.stats.stopped < sim.cars.length / 2);
-    assert.ok(sim.laps > 0);
+    assert.ok(
+      sim.cars.some((c) => blockedLane.has(c.id) && c.laps > 0),
+      "blocked-lane drivers must also escape and complete laps",
+    );
     checkSafe(sim);
   }
 });

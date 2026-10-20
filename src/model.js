@@ -14,7 +14,7 @@ export const PERSONALITIES = {
     accel: 1.5,
     brake: 2.5,
     description:
-      "90 km/h. Passes traffic at 70 km/h or below on the left. Uses smaller merge gaps, checks approaching cars, and keeps right when clear.",
+      "90 km/h. Passes traffic at 70 km/h or below on the left. Checks follower braking before merging, makes room gently at blocked lanes, and keeps right when clear.",
   },
   slowpoke: {
     name: "Slowpoke",
@@ -681,7 +681,6 @@ export class Simulation {
     )
       return false;
     const { front, rear, gap, backGap } = this.neighbors(car, lane);
-    const p = PERSONALITIES[car.type];
     if (car.type === "stuntman") {
       // Risky cut-ins deliberately ignore the following driver's comfortable
       // headway. Physical clearance and the collision guard still apply.
@@ -702,58 +701,274 @@ export class Simulation {
     const multiplier = regular ? 0.5 : car.type === "cautious" ? 1.3 : 0.85;
     const minimumGap = regular ? 4 : 6;
     const closingTime = regular ? 1 : 2;
-    const source = regular ? this.neighbors(car, car.lane) : null;
-    // Keep obstacle bypasses available so a blocked queue can still escape.
-    const bypass =
+    if (
+      !(
+        gap >
+          Math.max(
+            minimumGap,
+            car.v * multiplier +
+              Math.max(0, car.v - (front?.v ?? car.v)) * closingTime,
+          ) &&
+        backGap >
+          Math.max(
+            minimumGap,
+            (rear?.v ?? 0) * multiplier +
+              Math.max(0, (rear?.v ?? 0) - car.v) * closingTime,
+          )
+      )
+    )
+      return false;
+    if (
+      rear &&
       regular &&
-      lane > car.lane &&
-      (source.front?.obstacle ||
-        source.front?.broken ||
-        this.obstructionQueues()[car.lane].has(car.id));
-    if (rear && (lane < car.lane || (regular && !bypass))) {
-      // A physically clear gap can still force a faster follower to brake.
-      // Regulars accept comfortable braking and judge the middle of the
-      // maneuver, rather than demanding an almost undisturbed follower after
-      // the entire lane change. Inner laps are shorter, so convert our initial
-      // angular progress to the destination lane's pace.
-      const slowing = regular
-        ? Math.min(0, this.followingAcceleration(car, source.front, source.gap))
-        : 0;
-      const mergeSpeed = Math.max(
-        0,
-        (car.v * this.laneLength(lane)) / this.laneLength(car.lane) +
-          slowing * LANE_CHANGE_TIME * 0.5,
-      );
-      const closing = Math.max(0, rear.v - mergeSpeed);
+      !this.comfortableMerge(car, lane, { front, rear, gap, backGap })
+    )
+      return false;
+    if (rear && !regular && lane < car.lane) {
+      const mergeSpeed =
+        (car.v * this.laneLength(lane)) / this.laneLength(car.lane);
       const projectedGap =
         backGap -
-        closing *
-          (this.config.reaction + LANE_CHANGE_TIME * (regular ? 0.5 : 1));
-      const comfortableBrake = Math.min(
-        regular ? 2.5 : 1.5,
-        PERSONALITIES[rear.type].brake,
-      );
+        Math.max(0, rear.v - mergeSpeed) *
+          (this.config.reaction + LANE_CHANGE_TIME);
       if (
         projectedGap <= 0 ||
         this.followingAcceleration(rear, { v: mergeSpeed }, projectedGap) <
-          -comfortableBrake
+          -Math.min(1.5, PERSONALITIES[rear.type].brake)
       )
         return false;
     }
-    return (
-      gap >
-        Math.max(
-          minimumGap,
-          car.v * multiplier +
-            Math.max(0, car.v - (front?.v ?? car.v)) * closingTime,
-        ) &&
-      backGap >
-        Math.max(
-          minimumGap,
-          (rear?.v ?? 0) * multiplier +
-            Math.max(0, (rear?.v ?? 0) - car.v) * closingTime,
+    return true;
+  }
+  yieldAcceleration(car) {
+    if (car.yieldFor == null) return Infinity;
+    const gap = car.yieldStopDistance - car.distance;
+    return -Math.min(1, car.v ** 2 / (2 * Math.max(1, gap)));
+  }
+  // At a blocked lane, make room early by coasting gently from far enough
+  // away. A stationary driver otherwise cannot join an unbroken fast queue.
+  updateMergeCourtesy() {
+    const reserved = new Set();
+    for (const rear of this.cars) {
+      if (rear.yieldFor == null) continue;
+      const waiting = this.cars.find((c) => c.id === rear.yieldFor);
+      if (waiting?.lane === rear.lane && waiting.target === null)
+        rear.yieldCompletedAt ??= this.time;
+      const source = waiting ? this.neighbors(waiting, waiting.lane) : null;
+      const opening = waiting ? this.neighbors(waiting, rear.lane) : null;
+      if (
+        !waiting ||
+        rear.broken ||
+        this.time < rear.brakeUntil ||
+        (rear.yieldCompletedAt != null &&
+          this.time - rear.yieldCompletedAt >= this.config.reaction) ||
+        (waiting.target === null &&
+          waiting.lane !== rear.lane &&
+          (!this.junction.canChangeLane(waiting, this) ||
+            (opening.front && opening.gap < 4 && opening.front.v < 0.5) ||
+            !(source?.front?.obstacle || source?.front?.broken) ||
+            source.gap > 40))
+      ) {
+        delete rear.yieldFor;
+        delete rear.yieldStopDistance;
+        delete rear.yieldCompletedAt;
+      } else reserved.add(waiting.id);
+    }
+    for (const waiting of this.cars) {
+      if (
+        waiting.type !== "regular" ||
+        waiting.yieldFor != null ||
+        !this.junction.canChangeLane(waiting, this) ||
+        this.time < waiting.brakeUntil ||
+        waiting.broken ||
+        waiting.target !== null ||
+        waiting.v > 5 ||
+        reserved.has(waiting.id)
+      )
+        continue;
+      const source = this.neighbors(waiting, waiting.lane);
+      if (source.gap > 30 || (!source.front?.obstacle && !source.front?.broken))
+        continue;
+      for (const lane of [waiting.lane - 1, waiting.lane + 1]) {
+        if (lane < 0 || lane >= this.config.lanes) continue;
+        const opening = this.neighbors(waiting, lane);
+        if (
+          (opening.front && opening.gap < 4 && opening.front.v < 0.5) ||
+          this.safeLane(waiting, lane)
         )
+          continue;
+        let chosen = null,
+          closest = Infinity;
+        for (const rear of this.cars) {
+          if (
+            rear.type !== "regular" ||
+            rear.lane !== lane ||
+            rear.target !== null ||
+            rear.broken ||
+            rear.yieldFor != null ||
+            this.time < rear.brakeUntil ||
+            !this.sameRoad(rear, waiting)
+          )
+            continue;
+          const distance =
+            this.forward(rear.q, waiting.q, lane) - CAR_LENGTH - 6;
+          const stoppingRoom =
+            rear.v * this.config.reaction + rear.v ** 2 / 2 + 12;
+          if (
+            distance >= stoppingRoom &&
+            distance < stoppingRoom + Math.max(80, rear.v * 3) &&
+            distance < closest
+          ) {
+            chosen = rear;
+            closest = distance;
+          }
+        }
+        if (chosen) {
+          chosen.yieldFor = waiting.id;
+          chosen.yieldStopDistance = chosen.distance + closest;
+          reserved.add(waiting.id);
+          break;
+        }
+      }
+    }
+  }
+  // Trial only the affected vehicles for the merge plus reaction/recovery.
+  // Delayed observations, lane geometry, front-car slowing and physical stops
+  // all matter; the discarded forecast never advances the live simulation.
+  comfortableMerge(car, lane, { front, rear, gap, backGap }) {
+    const source = this.neighbors(car, car.lane);
+    const sourceLength = this.laneLength(car.lane),
+      destinationLength = this.laneLength(lane);
+    const initial = {
+      q: 0,
+      v: car.v,
+      rearQ: -(backGap + CAR_LENGTH) / destinationLength,
+      rearV: rear.v,
+      sourceQ: source.front
+        ? (source.gap +
+            (CAR_LENGTH + (source.front.length ?? CAR_LENGTH)) / 2) /
+          sourceLength
+        : Infinity,
+      sourceV: source.front?.v ?? 0,
+      frontQ: front
+        ? (gap + (CAR_LENGTH + (front.length ?? CAR_LENGTH)) / 2) /
+          destinationLength
+        : Infinity,
+      frontV: front?.v ?? 0,
+    };
+    const observations = [initial];
+    const delay = Math.round(this.config.reaction / STEP);
+    const horizon = Math.ceil(
+      Math.max(4, this.config.reaction + LANE_CHANGE_TIME + 1) / STEP,
     );
+    const forecast = Object.create(this);
+    const brakingLimit = Math.min(1.5, PERSONALITIES[rear.type].brake);
+    const rearBeforeNoticing = Math.min(
+      this.yieldAcceleration(rear),
+      Math.max(rear.a ?? 0, this.acceleration(rear, lane, this)),
+    );
+    const ownCap =
+      Math.min(160, PERSONALITIES[car.type].speed + this.variance(car)) / 3.6;
+    const rearCap =
+      Math.min(160, PERSONALITIES[rear.type].speed + this.variance(rear)) / 3.6;
+    const leaderMove = (leader, speed) => {
+      if (!leader || leader.obstacle) return { speed: 0, distance: 0 };
+      const actor = { ...leader, v: speed };
+      const a = leader.broken
+        ? -6
+        : Math.min(
+            leader.a ?? 0,
+            forecast.followingAcceleration(actor, null, Infinity),
+          );
+      const next = Math.max(0, speed + a * STEP);
+      return { speed: next, distance: ((speed + next) * STEP) / 2 };
+    };
+    for (let i = 0; i < horizon; i++) {
+      const time = i * STEP;
+      forecast.time = this.time + time;
+      const now = observations[i],
+        seen = observations[Math.max(0, i - delay)];
+      const own = { ...car, v: seen.v };
+      let ownA = forecast.followingAcceleration(
+        own,
+        front ? { v: seen.frontV } : null,
+        (seen.frontQ - seen.q) * destinationLength -
+          (CAR_LENGTH + (front?.length ?? CAR_LENGTH)) / 2,
+      );
+      if (time < LANE_CHANGE_TIME)
+        ownA = Math.min(
+          ownA,
+          forecast.followingAcceleration(
+            own,
+            source.front ? { v: seen.sourceV } : null,
+            (seen.sourceQ - seen.q) * sourceLength -
+              (CAR_LENGTH + (source.front?.length ?? CAR_LENGTH)) / 2,
+          ),
+        );
+      let rearA =
+        i < delay
+          ? rearBeforeNoticing
+          : forecast.followingAcceleration(
+              { ...rear, v: seen.rearV },
+              { v: seen.v },
+              (seen.q - seen.rearQ) * destinationLength - CAR_LENGTH,
+            );
+      if (
+        rear.yieldFor === car.id &&
+        time < LANE_CHANGE_TIME + this.config.reaction
+      ) {
+        const remaining =
+          rear.yieldStopDistance -
+          rear.distance -
+          (now.rearQ - initial.rearQ) * destinationLength;
+        rearA = Math.min(
+          rearA,
+          -Math.min(1, now.rearV ** 2 / (2 * Math.max(1, remaining))),
+        );
+      }
+      if (i >= delay && rearA < -brakingLimit) return false;
+      const nextV = clamp(now.v + ownA * STEP, 0, Math.max(now.v, ownCap));
+      const nextRearV = clamp(
+        now.rearV + rearA * STEP,
+        0,
+        Math.max(now.rearV, rearCap),
+      );
+      const blend = Math.min(1, time / LANE_CHANGE_TIME);
+      const length = this.laneLength(car.lane + (lane - car.lane) * blend);
+      const sourceMove = leaderMove(source.front, now.sourceV);
+      const frontMove = leaderMove(front, now.frontV);
+      const next = {
+        q: now.q + ((now.v + nextV) * STEP) / (2 * length),
+        v: nextV,
+        rearQ:
+          now.rearQ +
+          ((now.rearV + nextRearV) * STEP) / (2 * destinationLength),
+        rearV: nextRearV,
+        sourceQ: now.sourceQ + sourceMove.distance / sourceLength,
+        sourceV: sourceMove.speed,
+        frontQ: now.frontQ + frontMove.distance / destinationLength,
+        frontV: frontMove.speed,
+      };
+      let maximumQ =
+        next.frontQ -
+        ((CAR_LENGTH + (front?.length ?? CAR_LENGTH)) / 2 + 0.5) /
+          destinationLength;
+      if (time + STEP < LANE_CHANGE_TIME)
+        maximumQ = Math.min(
+          maximumQ,
+          next.sourceQ -
+            ((CAR_LENGTH + (source.front?.length ?? CAR_LENGTH)) / 2 + 0.5) /
+              sourceLength,
+        );
+      if (next.q > maximumQ) {
+        next.q = Math.max(now.q, maximumQ);
+        next.v = Math.min(next.v, ((next.q - now.q) * length) / STEP);
+      }
+      if ((next.q - next.rearQ) * destinationLength - CAR_LENGTH < 0.5)
+        return false;
+      observations.push(next);
+    }
+    return true;
   }
   canOvertake(car, leader, requireClosing = true) {
     if (!leader || leader.obstacle || leader.broken) return false;
@@ -779,6 +994,7 @@ export class Simulation {
   considerLane(car, delayed) {
     if (
       car.target !== null ||
+      car.yieldFor != null ||
       car.cooldown > 0 ||
       car.broken ||
       !this.junction.canChangeLane(car, this) ||
@@ -940,6 +1156,7 @@ export class Simulation {
       throw new Error("Use the fixed 0.05-second simulation step.");
     if (this.stream) this.inflow();
     this.junction.update(this);
+    this.updateMergeCourtesy();
     const delayed =
       this.history[
         Math.max(
@@ -975,6 +1192,7 @@ export class Simulation {
             PERSONALITIES[car.type].accel,
           ),
         );
+      a = Math.min(a, this.yieldAcceleration(car));
       if (car.broken || this.time < car.brakeUntil) a = -6;
       if (car.broken && car.v < 0.1) a = 0;
       if (a < -3 && car.a >= -3) this.hardBrakes++;
@@ -1224,6 +1442,9 @@ export class Simulation {
     for (const c of this.cars) {
       c.broken = false;
       c.brakeUntil = 0;
+      delete c.yieldFor;
+      delete c.yieldStopDistance;
+      delete c.yieldCompletedAt;
     }
     this.log("All incidents cleared");
   }
