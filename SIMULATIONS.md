@@ -12,6 +12,8 @@ npm run simulate -- --layout u --interval 2 --probabilities regular=70,slowpoke=
 
 `--interval` or `--probabilities` selects arrival mode; `--traffic stream` also selects it explicitly. Percentages must sum to 100, or all be zero to disable arrivals (for example, `--probabilities regular=0`). Omitted driver types have zero probability. The interval is total offered demand across all entrances, not per lane or entrance. Entrances at a `cross` are chosen uniformly using the seed. Every blocked arrival waits upstream; at most 180 cars occupy the visible road. Reports include `arrived`, `entered`, `upstream`, `active`, `completedTrips`, and exit-based `throughputPerMinute`. Each car counts once on exit, and paused time is excluded. The video labels this **Cars through** and uses percentages in its driver legend.
 
+All stream layouts compare safe entry speeds across lanes, use the clear/faster lane, and fit incoming speed to the gap rather than inserting a car that must brake immediately. A preferred lane wins when speeds are within 2 km/h. Entrance queues and the seeded schedule/mix remain unchanged; this affects how and when offered arrivals can join. Newborns get consistent entry-time perception until their delayed history is available, while later hazards retain the configured reaction delay.
+
 Both `u` (sideways U) and `cross` (+ junction) are open roads. Cars at the + go to the opposite exit; `stop`, `lights`, and `roundabout` controls are available. Existing `circle`, `rectangle`, and `figure8` shapes also support arrival mode, with one circuit per arriving car. Their original fixed-count behavior remains available using `--cars` or `--traffic fixed`.
 
 Install the video tools once (Node 18+):

@@ -30,6 +30,10 @@ For continuous arrivals and exit-based throughput, use `--scenario examples/open
 4. Use **Brake** to brake a car for three seconds, **Break down** for a persistent stoppage, or **Obstacle** to close a small patch of a lane. Obstacles cannot be placed inside cars. **Remove / repair** reverses incidents, and **Clear all incidents** releases the entire road.
 5. Inspect a car for its speed, personality, following gap, and current behavior. The vehicle list offers keyboard-accessible alternatives to clicking cars.
 
+Arrivals compare all entrance lanes before joining. They use a clear/faster lane when the preferred lane is busy, retaining the usual right-lane preference (or the Annoying slowpoke's left-lane preference) when entry speeds differ by no more than 2 km/h. Entry speed is fitted to the actual following gap and reaction allowance, so a car does not appear at a speed that immediately demands braking. A far-away slow vehicle no longer sets every arrival's speed. Blocked entrances still queue upstream, and loop entries wait for a gap that will not force a nearby rear car to brake sharply.
+
+New drivers initially use a consistent view from the moment they enter until their reaction history becomes available. This avoids comparing a newborn's current position with an older position of its leader, which previously invented short gaps and braking ripples. Hazards appearing after entry still have the selected reaction delay.
+
 To retain exact-count experiments, choose a circle, rounded rectangle, or four-arm loop and select **Fixed cars · closed loop**. The combined limit remains 180 and cars must physically fit. Circle/rectangle cars start evenly spaced at desired speeds; the four-arm loop starts at rest with the junction clear. Switching setup modes preserves separate counts and probability mixes. A seed reproduces arrival personalities, entrances, and driver order. Existing saved setups migrate to the new arrivals mode with their old fixed counts retained for switching back.
 
 Each driver type has a **Speed variance** slider from **±0 to ±20 km/h**. For example, Regular at ±5 varies its target within 85–95 km/h. Each car independently drifts between seeded random targets over 6–12 seconds, accelerating/braking through the normal driving model; traffic, obstacles, and junctions can slow it further. The absolute top speed remains 160 km/h. Zero keeps the original steady target and is the default for saved setups and presets.
@@ -128,6 +132,7 @@ Deployment requires Git and authenticated GitHub CLI. Push source to `main`, the
 - `tests/replay.test.js` — historical cars/incidents/charts/throughput, junction states, bounded retention, and unchanged future arrivals.
 - `tests/passing.test.js` — temporary slowdowns, variance reversals, stale perception, multi-lane staging, and safely abandoning unproductive passes.
 - `tests/variance.test.js` — smooth independent speed drift, bounds, reproducibility, individual overrides/replay, dense traffic safety, and CLI configuration.
+- `tests/entry.test.js` — clear-lane admissions, gap-matched entry speed, startup braking, newborn reaction delay, safe loop entry, and observation cleanup.
 - `tests/stream.test.js` — arrivals, probabilities, upstream conservation/recovery, single exits, finite geometry, approach isolation, and controlled open junctions.
 - `scripts/simulate.mjs`, `scripts/lib/` — command-line experiments and MP4/JSON/PNG export.
 - `examples/long-arms.json` — reproducible three-minute video scenario.
