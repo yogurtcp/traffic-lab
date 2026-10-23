@@ -110,3 +110,83 @@ test("an unproductive pass returns right safely instead of occupying the passing
   }
   assert.equal(car.lane, 1);
 });
+
+function heldTraffic(reaction, lanes = 2, layout = "circle", type = "cautious") {
+  let sim = new Simulation({
+    ...PRESETS.perfect,
+    lanes,
+    length: 2500,
+    reaction,
+    counts: { regular: 2, [type]: 1 },
+  });
+  if (layout === "u") {
+    const cars = sim.cars;
+    sim = new Simulation({ ...PRESETS.stream, lanes, length: 2500, reaction });
+    sim.cars = cars;
+    sim.arrived = sim.entered = cars.length;
+    sim.nextCar = cars.length + 1;
+    sim.nextArrival = 1000;
+  }
+  const [car, leader] = sim.cars.filter((c) => c.type === "regular");
+  const slow = sim.cars.find((c) => c.type === type);
+  for (const [i, vehicle] of [car, leader, slow].entries()) {
+    Object.assign(vehicle, {
+      lane: lanes - 1,
+      from: lanes - 1,
+      q: 0.2 + i * 42 / sim.laneLength(lanes - 1),
+      v: (type === "cautious" ? 78 : 68) / 3.6,
+      cooldown: vehicle === car ? 0 : 1000,
+    });
+  }
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  return { sim, car, leader, slow };
+}
+
+test("Regulars pass a Regular held below its cruising speed by moving traffic, including above 70", () => {
+  let pulledOutAfterBraking = false;
+  for (const reaction of [0, 0.9, 2])
+    for (const layout of ["circle", "u"])
+      for (const lanes of [2, 3])
+        for (const type of ["cautious", "slowpoke"]) {
+          const { sim, car, leader } = heldTraffic(reaction, lanes, layout, type);
+          const label = `${layout}, ${lanes} lanes, ${reaction}s reaction, ${type}`;
+          let started = false,
+            passed = false;
+          for (let i = 0; i < 900; i++) {
+            sim.step();
+            if (car.target !== null && car.target < car.from) {
+              if (!started && car.v + 0.05 < leader.v)
+                pulledOutAfterBraking = true;
+              started = true;
+            }
+            separated(sim);
+            if (car.q > leader.q) {
+              assert.ok(
+                car.lane < leader.lane,
+                `complete the pass on the left: ${label}`,
+              );
+              passed = true;
+              break;
+            }
+          }
+          assert.ok(started, `never attempted a pass: ${label}`);
+          assert.ok(passed, `never got around held traffic: ${label}`);
+          assert.ok(
+            car.v * 3.6 > 80,
+            `accelerate in the clear passing lane: ${label}`,
+          );
+        }
+  assert.ok(
+    pulledOutAfterBraking,
+    "a constrained follower can pull out to accelerate",
+  );
+});
+
+test("Speedsters pass an unimpeded Regular doing 90 instead of waiting for a 70 km/h slowdown", () => {
+  const { sim, car, leader } = scenario("speedster");
+  car.v = 100 / 3.6;
+  leader.v = 90 / 3.6;
+  sim.history = Array.from({ length: 43 }, () => sim.snapshot());
+  sim.considerLane(car, sim.snapshot());
+  assert.equal(car.target, 0);
+});

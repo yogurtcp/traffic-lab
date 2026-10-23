@@ -74,7 +74,7 @@ All personalities obey junction right of way. Lane changes are disabled near or 
 
 | Driver            | Desired speed    | Behavior                                                                      |
 | ----------------- | ---------------- | ----------------------------------------------------------------------------- |
-| Regular           | 90 km/h          | Passes cars doing 70 km/h or less on the left; keeps right when clear.        |
+| Regular           | 90 km/h          | Passes slower or persistently held-up traffic on the left; keeps right when clear. |
 | Slowpoke          | 70 km/h          | Slower cruise, moderate following space; passes slower vehicles on the left.  |
 | Annoying slowpoke | 70 km/h          | Stays in the leftmost lane. Avoids stationary obstructions and returns left.  |
 | Speedster         | 110 km/h         | Same passing policy as Regular, with a higher desired speed.                  |
@@ -85,7 +85,7 @@ All personalities obey junction right of way. Lane changes are disabled near or 
 
 The road speed limit is 90 km/h. Speedster and Stuntman intentionally exceed it. All drivers use the same selected perception delay. Ordinary passing on the right is prevented for everyone except Stuntman, including across nonadjacent lanes. Stationary obstacles, broken vehicles, and their connected slow queues can be avoided on either side. This exception keeps the adjacent lane moving so blocked drivers can find a gap to merge; an unrelated obstacle elsewhere on the ring does not allow passing on the right.
 
-Discretionary passing requires a cruising-speed advantage of more than 2 km/h as well as a useful current target. The driver's lower of base/current target must beat the leader's higher of base/current target/actual speed. A brief brake or favourable variance swing alone does not justify pulling out. A live closing-speed check also rejects a pass if delayed perception still shows a slowdown but the leader is already pulling away. The passing lane must also offer more than 2 km/h of speed advantage over that traffic. A slowpoke therefore follows another car doing 70 km/h instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
+Discretionary passing requires more than 2 km/h of attainable speed advantage. Drivers compare cruising intent, but can also pass a normally fast car that traffic is holding back: after observing it for at least 1.5 seconds, they compare its smoothed actual pace and current speed against their own target. This observation respects the selected reaction delay. An unimpeded leader recovering to an equal or higher target still does not justify pulling out. A constrained follower that has already braked slightly below the leader's speed can move left to accelerate. There is no 70 km/h cutoff, so a Speedster can also pass a Regular doing 90. The passing lane must offer a useful speed gain and satisfy the same front/rear merge forecasts. A Slowpoke still follows another car doing 70 instead of moving out to pass it. Obstacle avoidance and the Annoying slowpoke's preference for the leftmost lane are separate decisions.
 
 Drivers stay left while a pass remains worthwhile, accelerate past the slower car, and return right when clear. If the speed advantage disappears, they give up the pass and return right when a safe gap opens. They also stay in position while approaching a slower vehicle they can soon pass, instead of moving farther right before catching it. If slower traffic to the left holds a car back under the no-undertaking rule, it can move left in stages, get behind that vehicle, and pass using the lane to its left. A slow car already in the leftmost lane still cannot legally be passed on its right.
 
@@ -140,7 +140,7 @@ Deployment requires Git and authenticated GitHub CLI. Push source to `main`, the
 - `tests/cli.test.js` — scenario validation, deterministic interventions, metrics, and CLI output protection.
 - `src/replay.js` — bounded, read-only recordings for timeline playback.
 - `tests/replay.test.js` — historical cars/incidents/charts/throughput, junction states, bounded retention, and unchanged future arrivals.
-- `tests/passing.test.js` — temporary slowdowns, variance reversals, stale perception, multi-lane staging, and safely abandoning unproductive passes.
+- `tests/passing.test.js` — held-up traffic above/below 70 km/h across loops and U roads, temporary slowdowns, variance reversals, stale perception, multi-lane staging, and safely abandoning unproductive passes.
 - `tests/variance.test.js` — smooth independent speed drift, bounds, reproducibility, individual overrides/replay, dense traffic safety, and CLI configuration.
 - `src/pwa.js`, `src/handoff.js`, `sw.js`, `manifest.webmanifest` — installation, startup-only updates, offline caching, and per-window upgrade handoffs.
 - `tests/pwa.test.js`, `tests/offline.test.js`, `tests/session.test.js` — installation/update timing, failed updates, offline assets, and exact session restoration.

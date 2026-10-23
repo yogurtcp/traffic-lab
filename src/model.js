@@ -14,7 +14,7 @@ export const PERSONALITIES = {
     accel: 1.5,
     brake: 2.5,
     description:
-      "90 km/h. Passes traffic at 70 km/h or below on the left. Checks follower braking before merging, makes room gently at blocked lanes, and keeps right when clear.",
+      "90 km/h. Passes slower or persistently held-up traffic on the left. Checks follower braking before merging, makes room gently at blocked lanes, and keeps right when clear.",
   },
   slowpoke: {
     name: "Slowpoke",
@@ -43,7 +43,7 @@ export const PERSONALITIES = {
     accel: 2,
     brake: 3,
     description:
-      "110 km/h. Like Regular, passes traffic at 70 km/h or below, only on the left.",
+      "110 km/h. Like Regular, passes slower or persistently held-up traffic, only on the left.",
   },
   stuntman: {
     name: "Stuntman",
@@ -426,6 +426,10 @@ export class Simulation {
       throw new Error(
         "Too many cars in one lane. Increase the road length, add lanes, or reduce the driver count.",
       );
+    for (const car of this.cars) {
+      car.paceV = car.v;
+      car.paceAge = 0;
+    }
     const snapshot = this.snapshot();
     this.history = Array.from({ length: 43 }, () => snapshot);
     this.sample();
@@ -438,6 +442,8 @@ export class Simulation {
         lane: c.lane,
         target: c.target,
         v: c.v,
+        paceV: c.paceV,
+        paceAge: c.paceAge,
         type: c.type,
         speedVariance: c.speedVariance,
         broken: c.broken,
@@ -545,6 +551,8 @@ export class Simulation {
       // Keep the personality's lane preference when paces are comparable;
       // otherwise use the clear/faster lane instead of manufacturing a queue.
       const car = candidates.find((car) => car.v >= fastest - 2 / 3.6);
+      car.paceV = car.v;
+      car.paceAge = 0;
       this.cars.push(car);
       queue.shift();
       this.entered++;
@@ -1024,9 +1032,9 @@ export class Simulation {
     if (!leader || leader.obstacle || leader.broken) return false;
     const live = this.cars.find((c) => c.id === leader.id);
     if (!live) return false;
-    // A brief brake or a favourable variance swing is not a lasting passing
-    // advantage. Compare both cruising intent and the current target; do not
-    // pull out behind someone who is already moving away in the live state.
+    // Cruising intent prevents futile passes around briefly slowed drivers.
+    // Observed pace also permits passing a normally fast driver held up by
+    // traffic. Use the delayed observation, not knowledge of its future target.
     const ownPace = Math.min(
       this.desiredSpeed(car),
       PERSONALITIES[car.type].speed / 3.6,
@@ -1036,9 +1044,22 @@ export class Simulation {
       this.desiredSpeed(live),
       PERSONALITIES[live.type].speed / 3.6,
     );
+    const cruisingAdvantage = ownPace > leaderPace + 2 / 3.6;
+    const observedAdvantage =
+      (leader.paceAge ?? 0) >= 1.5 &&
+      ownPace > Math.max(leader.v, live.v, leader.paceV ?? leader.v) + 2 / 3.6 &&
+      (ownPace > this.desiredSpeed(live) + 2 / 3.6 ||
+        live.a < -0.25 ||
+        this.followingAcceleration(live, null, Infinity) >
+          this.acceleration(live, live.lane, this) + 0.15);
+    if (!cruisingAdvantage && !observedAdvantage) return false;
+    if (!requireClosing || car.v + 0.05 >= live.v) return true;
+    // A follower may already have braked slightly below the leader's pace.
+    // Let it pull out to accelerate if traffic is genuinely holding it back.
     return (
-      ownPace > leaderPace + 2 / 3.6 &&
-      (!requireClosing || car.v + 0.05 >= live.v)
+      observedAdvantage &&
+      this.followingAcceleration(car, null, Infinity) >
+        this.acceleration(car, car.lane, this) + 0.15
     );
   }
   considerLane(car, delayed) {
@@ -1060,22 +1081,17 @@ export class Simulation {
     const slowAhead =
       front &&
       gap < passingRange &&
-      front.v * 3.6 <= 70.5 &&
       this.canOvertake(car, front, false);
     const obstruction =
       front &&
       (front.obstacle ||
         front.broken ||
         this.obstructionQueues(delayed)[car.lane].has(car.id));
-    // Being near a car doing 70 does not itself justify passing: the driver
-    // must be held below their own desired speed, and not be falling behind.
+    // Pass when traffic holds us below our attainable pace, at any speed.
     const blocked =
       front &&
       gap < lookAhead &&
-      (obstruction ||
-        (front.v * 3.6 <= 70.5 &&
-          this.canOvertake(car, front) &&
-          front.v <= old.v + 0.05));
+      (obstruction || this.canOvertake(car, front));
     let choices = [];
     if (car.type === "hog") {
       if (car.lane > 0) choices = [car.lane - 1];
@@ -1128,10 +1144,7 @@ export class Simulation {
             !queues[lane].has(vehicle.id) &&
             !this.junction.inApproachQueue(vehicle, this) &&
             left.gap < passingRange &&
-            vehicle.v * 3.6 <= 70.5 &&
-            this.canOvertake(car, vehicle) &&
-            (vehicle.v * this.laneLength(car.lane)) / this.laneLength(lane) <=
-              old.v + 0.05
+            this.canOvertake(car, vehicle)
           ) {
             heldByLeft = true;
             break;
@@ -1347,6 +1360,12 @@ export class Simulation {
         ? mod(car.q + move.advance)
         : car.q + move.advance;
       car.v = move.v;
+      // Smooth observed pace so a single braking frame is not a new cruise
+      // speed. Snapshots carry this history through the driver's reaction delay.
+      car.paceV =
+        (car.paceV ?? car.v) +
+        ((car.v - (car.paceV ?? car.v)) * dt) / (1.2 + dt);
+      car.paceAge = Math.min(1.5, (car.paceAge ?? 0) + dt);
       if (car.target !== null) {
         car.blend = Math.min(1, car.blend + dt / LANE_CHANGE_TIME);
         if (car.blend >= 1) {
