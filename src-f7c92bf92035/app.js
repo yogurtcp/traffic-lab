@@ -9,6 +9,8 @@ import {
 } from "./model.js";
 import { RoadView, drawCharts } from "./view.js";
 import { ReplayBuffer } from "./replay.js";
+import { startPwa } from "./pwa.js";
+import { readHandoff, clearHandoff } from "./handoff.js";
 const $ = (id) => document.getElementById(id);
 let initial = PRESETS.stream;
 try {
@@ -912,18 +914,114 @@ $("normalize-probabilities").addEventListener("click", () => {
   rows.forEach((w) => ($(`count-${w.k}`).value = w.units / 100));
   configurationChanged();
 });
+const formIds = [
+  "traffic",
+  "interval",
+  "layout",
+  "intersection",
+  "lanes",
+  "length",
+  "reaction",
+  "seed",
+  "preset",
+  "rate",
+  ...KEYS.flatMap((k) => [`count-${k}`, `variance-${k}`]),
+];
+let restored = null;
+document.querySelector("main").inert = true;
+const handoff = await readHandoff();
+if (handoff?.schema === 1 && handoff.session?.schema === 1) {
+  try {
+    const session = handoff.session;
+    if (!session.form || !session.draftMix)
+      throw new Error("Incomplete handoff");
+    const live = Simulation.fromState(session.live);
+    const buffer = ReplayBuffer.fromState(session.recording, live);
+    const view = session.replaying ? buffer.at(session.replayCursor) : live;
+    if (!view) throw new Error("Empty replay");
+    liveSim = live;
+    recording = buffer;
+    replaying = session.replaying;
+    replayCursor = session.replayCursor;
+    sim = view;
+    selected = session.selected;
+    speedOverlay = session.speedOverlay;
+    configurationValid = session.configurationValid;
+    editPlaybackIntent = session.editPlaybackIntent;
+    restored = session;
+  } catch {
+    /* Keep the saved handoff available for recovery. */
+  }
+}
 showConfig(sim.config);
-if (!hasTraffic())
-  $("setup-note").textContent =
-    "No drivers selected. Add a count or set an arriving mix to 100%.";
-$("preset").value =
-  initial === PRESETS.stream
-    ? "stream"
-    : initial === PRESETS.mixed
-      ? "mixed"
-      : "custom";
+if (restored) {
+  draftMix = restored.draftMix;
+  mixMode = restored.mixMode;
+  for (const id of formIds)
+    if (Object.hasOwn(restored.form, id)) $(id).value = restored.form[id];
+  updateIntersectionFields();
+  updateTrafficFields(false);
+  for (const id of formIds)
+    if (Object.hasOwn(restored.form, id)) $(id).value = restored.form[id];
+  updateLaneButtons();
+  updateLabels();
+  updateTotal();
+  $("heat-overlay").checked = speedOverlay;
+  $("setup-note").textContent = restored.note;
+  $("setup-note").classList.toggle("invalid", !configurationValid);
+  document.querySelector(`[data-tool="${restored.tool}"]`)?.click();
+  setRunning(restored.running && canPlay());
+} else {
+  if (!hasTraffic())
+    $("setup-note").textContent =
+      "No drivers selected. Add a count or set an arriving mix to 100%.";
+  $("preset").value =
+    initial === PRESETS.stream
+      ? "stream"
+      : initial === PRESETS.mixed
+        ? "mixed"
+        : "custom";
+}
 populateVehicles();
 updatePlay();
 updateHUD();
 draw();
+document.querySelector("main").inert = false;
+if (restored?.focus) $(restored.focus)?.focus();
+for (const id of restored?.dialogs ?? []) $(id)?.showModal();
+if (restored) {
+  try {
+    await clearHandoff();
+  } catch {}
+}
 requestAnimationFrame(frame);
+let upgradePlayback = false;
+startPwa({
+  version: document.querySelector('meta[name="app-version"]').content,
+  prepare() {
+    upgradePlayback = running;
+    setRunning(false);
+    return {
+      schema: 1,
+      live: liveSim.exportState(),
+      recording: recording.exportState(),
+      focus: document.activeElement?.id,
+      dialogs: ["about", "install-help"].filter((id) => $(id).open),
+      replaying,
+      replayCursor,
+      running: upgradePlayback,
+      selected,
+      tool,
+      speedOverlay,
+      configurationValid,
+      editPlaybackIntent,
+      mixMode,
+      draftMix,
+      form: Object.fromEntries(formIds.map((id) => [id, $(id).value])),
+      note: $("setup-note").textContent,
+    };
+  },
+  resume() {
+    setRunning(upgradePlayback && canPlay());
+  },
+});

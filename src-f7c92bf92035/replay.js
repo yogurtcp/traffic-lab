@@ -8,6 +8,30 @@ export class ReplayBuffer {
     this.seconds = seconds;
     this.frames = [];
   }
+  exportState() {
+    return {
+      seconds: this.seconds,
+      frames: this.frames.map((frame) => {
+        const { route, junction, ...data } = frame;
+        return { ...data, junction: { arrivals: junction.arrivals } };
+      }),
+    };
+  }
+  static fromState(saved, live) {
+    const recording = new ReplayBuffer(saved.seconds);
+    recording.frames = saved.frames.map((data) =>
+      Object.assign(Object.create(Simulation.prototype), data, {
+        config: live.config,
+        route: live.route,
+        junction: Object.assign(
+          Object.create(Object.getPrototypeOf(live.junction)),
+          data.junction,
+          { route: live.route, config: live.config },
+        ),
+      }),
+    );
+    return recording;
+  }
   get start() {
     return this.frames[0]?.time ?? 0;
   }
