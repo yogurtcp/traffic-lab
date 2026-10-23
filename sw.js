@@ -1,5 +1,5 @@
-const VERSION = "6c503a3f9f2cd888";
-const ASSETS = ["./","./index.html","./favicon.svg","./manifest.webmanifest","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./src-f7c92bf92035/app.js","./src-f7c92bf92035/handoff.js","./src-f7c92bf92035/junction.js","./src-f7c92bf92035/model.js","./src-f7c92bf92035/open-route.js","./src-f7c92bf92035/pwa.js","./src-f7c92bf92035/replay.js","./src-f7c92bf92035/route.js","./src-f7c92bf92035/style.css","./src-f7c92bf92035/view.js"];
+const VERSION = "8bd1cf5c2d43e9dd";
+const ASSETS = ["./","./index.html","./favicon.svg","./manifest.webmanifest","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./src-1f3289581479/app.js","./src-1f3289581479/handoff.js","./src-1f3289581479/junction.js","./src-1f3289581479/model.js","./src-1f3289581479/open-route.js","./src-1f3289581479/pwa.js","./src-1f3289581479/replay.js","./src-1f3289581479/route.js","./src-1f3289581479/style.css","./src-1f3289581479/view.js"];
 const SCOPE = new URL(self.registration.scope);
 const PREFIX = `loop-lab:${SCOPE.pathname}:`;
 const CACHE = PREFIX + VERSION;
