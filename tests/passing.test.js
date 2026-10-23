@@ -90,6 +90,7 @@ test("an unproductive pass returns right safely instead of occupying the passing
   car.v = 80 / 3.6;
   leader.v = 70 / 3.6;
   leader.speedVariance = 0;
+  leader.q = car.q + (80 + CAR_LENGTH) / sim.laneLength(1);
   let found = false;
   for (let time = 0; time < 200; time += 0.1) {
     sim.time = time;

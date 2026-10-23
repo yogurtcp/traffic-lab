@@ -3,10 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="app-version" content="development" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Loop Lab" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#f4f3ed" />
     <meta
       name="description"
-      content="Build circle, rounded-rectangle, and four-arm traffic loops. Mix drivers, compare intersection rules, and measure completed-lap throughput."
+      content="Explore open roads and traffic loops, mix driver personalities, replay congestion, and compare junction rules."
     />
     <title>Loop Lab — a traffic playground</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -21,10 +26,46 @@
         ><span class="beta">EXPERIMENT 001</span></a
       >
       <span class="top-caption">A little brake. A big chain reaction.</span>
-      <button class="quiet" id="about-open">
-        How it works <span aria-hidden="true">↗</span>
-      </button>
+      <div class="app-actions">
+        <button class="quiet" id="install-app">Install app</button>
+        <button class="quiet" id="about-open">
+          How it works <span aria-hidden="true">↗</span>
+        </button>
+      </div>
     </header>
+    <div id="update-overlay" class="update-overlay" role="status" hidden>
+      Updating Loop Lab… keeping your simulation.
+    </div>
+    <dialog
+      id="install-help"
+      class="install-help"
+      aria-labelledby="install-heading"
+    >
+      <button
+        id="install-close"
+        class="quiet"
+        aria-label="Close app information"
+      >
+        Close
+      </button>
+      <h2 id="install-heading">Keep Loop Lab handy</h2>
+      <p id="install-instructions"></p>
+      <button id="install-now" class="play" hidden>Install Loop Lab</button>
+      <p>
+        After the first complete online load, the installed app works offline.
+      </p>
+      <p>
+        Updates are checked only when you start online. A downloaded update
+        keeps your settings, drafts, simulation, and replay. No reinstall is
+        needed.
+      </p>
+      <p>
+        Browsers control installation availability and any activity while the
+        app is closed. Loop Lab does not poll for updates or check again on
+        focus or reconnection.
+      </p>
+      <p id="app-status" aria-live="polite">Preparing offline access…</p>
+    </dialog>
     <main>
       <div class="intro">
         <div>

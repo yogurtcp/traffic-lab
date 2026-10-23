@@ -1404,3 +1404,56 @@ button:disabled {
 .vehicle-variance {
   margin: 10px 0;
 }
+
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #f4f3edf2;
+  display: grid;
+  place-items: center;
+  padding: 30px;
+  text-align: center;
+  color: #273e30;
+  font-size: 16px;
+}
+.update-overlay[hidden] {
+  display: none;
+}
+.install-help {
+  max-width: 460px;
+}
+.install-help p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+#install-close {
+  float: right;
+}
+#app-status {
+  color: #586f4d;
+}
+#install-app {
+  white-space: nowrap;
+}
+
+.app-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+@media (max-width: 760px) {
+  .topbar {
+    gap: 8px;
+  }
+  .topbar .beta {
+    display: none;
+  }
+  .app-actions {
+    gap: 10px;
+  }
+  .app-actions > .quiet {
+    font-size: 10px;
+    padding: 5px 0;
+  }
+}

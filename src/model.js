@@ -229,13 +229,16 @@ export function normalizeConfig(input = {}) {
   };
 }
 function rng(seed) {
-  return () => {
+  const random = () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
     t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    random.state = seed;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  random.state = seed;
+  return random;
 }
 // Stateless seeded noise keeps each car independent without consuming the
 // arrival/shuffle RNG. Smooth interpolation avoids frame-to-frame jitter.
@@ -251,6 +254,25 @@ function speedNoise(seed, id, index) {
 export class Simulation {
   constructor(config = PRESETS.mixed) {
     this.reset(config);
+  }
+  exportState() {
+    const { route, junction, random, queueCache, ...state } = this;
+    const {
+      route: junctionRoute,
+      config: junctionConfig,
+      ...junctionState
+    } = junction;
+    return { ...state, randomState: random.state, junction: junctionState };
+  }
+  static fromState(saved) {
+    const { randomState, junction, ...data } = structuredClone(saved);
+    const sim = new Simulation(data.config);
+    const config = sim.config;
+    Object.assign(sim, data, { config });
+    sim.random = rng(randomState);
+    Object.assign(sim.junction, junction, { route: sim.route, config });
+    sim.queueCache = new WeakMap();
+    return sim;
   }
   variance(car) {
     return car.speedVariance ?? this.config.speedVariance[car.type];
@@ -718,10 +740,23 @@ export class Simulation {
       )
     )
       return false;
+    const source = this.neighbors(car, car.lane);
+    const bypass =
+      lane > car.lane &&
+      source.gap < Math.max(55, car.v * 3.5) &&
+      (source.front?.obstacle ||
+        source.front?.broken ||
+        this.obstructionQueues()[car.lane].has(car.id));
+    const checkFront = lane > car.lane && front && !bypass;
     if (
-      rear &&
-      regular &&
-      !this.comfortableMerge(car, lane, { front, rear, gap, backGap })
+      ((regular && (front || rear)) || checkFront) &&
+      !this.comfortableMerge(car, lane, {
+        front,
+        rear: regular ? rear : null,
+        gap,
+        backGap,
+        checkFront,
+      })
     )
       return false;
     if (rear && !regular && lane < car.lane) {
@@ -835,15 +870,19 @@ export class Simulation {
   // Trial only the affected vehicles for the merge plus reaction/recovery.
   // Delayed observations, lane geometry, front-car slowing and physical stops
   // all matter; the discarded forecast never advances the live simulation.
-  comfortableMerge(car, lane, { front, rear, gap, backGap }) {
+  comfortableMerge(
+    car,
+    lane,
+    { front, rear, gap, backGap, checkFront = false },
+  ) {
     const source = this.neighbors(car, car.lane);
     const sourceLength = this.laneLength(car.lane),
       destinationLength = this.laneLength(lane);
     const initial = {
       q: 0,
       v: car.v,
-      rearQ: -(backGap + CAR_LENGTH) / destinationLength,
-      rearV: rear.v,
+      rearQ: rear ? -(backGap + CAR_LENGTH) / destinationLength : -Infinity,
+      rearV: rear?.v ?? 0,
       sourceQ: source.front
         ? (source.gap +
             (CAR_LENGTH + (source.front.length ?? CAR_LENGTH)) / 2) /
@@ -862,15 +901,22 @@ export class Simulation {
       Math.max(4, this.config.reaction + LANE_CHANGE_TIME + 1) / STEP,
     );
     const forecast = Object.create(this);
-    const brakingLimit = Math.min(1.5, PERSONALITIES[rear.type].brake);
-    const rearBeforeNoticing = Math.min(
-      this.yieldAcceleration(rear),
-      Math.max(rear.a ?? 0, this.acceleration(rear, lane, this)),
-    );
+    const brakingLimit = rear
+      ? Math.min(1.5, PERSONALITIES[rear.type].brake)
+      : Infinity;
+    const ownBrakingLimit = Math.min(1.5, PERSONALITIES[car.type].brake);
+    const rearBeforeNoticing = rear
+      ? Math.min(
+          this.yieldAcceleration(rear),
+          Math.max(rear.a ?? 0, this.acceleration(rear, lane, this)),
+        )
+      : 0;
     const ownCap =
       Math.min(160, PERSONALITIES[car.type].speed + this.variance(car)) / 3.6;
-    const rearCap =
-      Math.min(160, PERSONALITIES[rear.type].speed + this.variance(rear)) / 3.6;
+    const rearCap = rear
+      ? Math.min(160, PERSONALITIES[rear.type].speed + this.variance(rear)) /
+        3.6
+      : 0;
     const leaderMove = (leader, speed) => {
       if (!leader || leader.obstacle) return { speed: 0, distance: 0 };
       const actor = { ...leader, v: speed };
@@ -895,6 +941,7 @@ export class Simulation {
         (seen.frontQ - seen.q) * destinationLength -
           (CAR_LENGTH + (front?.length ?? CAR_LENGTH)) / 2,
       );
+      if (checkFront && ownA < -ownBrakingLimit) return false;
       if (time < LANE_CHANGE_TIME)
         ownA = Math.min(
           ownA,
@@ -905,8 +952,9 @@ export class Simulation {
               (CAR_LENGTH + (source.front?.length ?? CAR_LENGTH)) / 2,
           ),
         );
-      let rearA =
-        i < delay
+      let rearA = !rear
+        ? 0
+        : i < delay
           ? rearBeforeNoticing
           : forecast.followingAcceleration(
               { ...rear, v: seen.rearV },
@@ -914,7 +962,7 @@ export class Simulation {
               (seen.q - seen.rearQ) * destinationLength - CAR_LENGTH,
             );
       if (
-        rear.yieldFor === car.id &&
+        rear?.yieldFor === car.id &&
         time < LANE_CHANGE_TIME + this.config.reaction
       ) {
         const remaining =
@@ -926,7 +974,7 @@ export class Simulation {
           -Math.min(1, now.rearV ** 2 / (2 * Math.max(1, remaining))),
         );
       }
-      if (i >= delay && rearA < -brakingLimit) return false;
+      if (rear && i >= delay && rearA < -brakingLimit) return false;
       const nextV = clamp(now.v + ownA * STEP, 0, Math.max(now.v, ownCap));
       const nextRearV = clamp(
         now.rearV + rearA * STEP,
@@ -949,10 +997,12 @@ export class Simulation {
         frontQ: now.frontQ + frontMove.distance / destinationLength,
         frontV: frontMove.speed,
       };
-      let maximumQ =
+      const frontLimit =
         next.frontQ -
         ((CAR_LENGTH + (front?.length ?? CAR_LENGTH)) / 2 + 0.5) /
           destinationLength;
+      if (next.q > frontLimit + 1e-8) return false;
+      let maximumQ = frontLimit;
       if (time + STEP < LANE_CHANGE_TIME)
         maximumQ = Math.min(
           maximumQ,
@@ -964,7 +1014,7 @@ export class Simulation {
         next.q = Math.max(now.q, maximumQ);
         next.v = Math.min(next.v, ((next.q - now.q) * length) / STEP);
       }
-      if ((next.q - next.rearQ) * destinationLength - CAR_LENGTH < 0.5)
+      if (rear && (next.q - next.rearQ) * destinationLength - CAR_LENGTH < 0.5)
         return false;
       observations.push(next);
     }

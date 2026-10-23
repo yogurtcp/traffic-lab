@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "Loop Lab — Traffic Playground",
+  "short_name": "Loop Lab",
+  "description": "Experiment with traffic, driver personalities, and congestion waves.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f3ed",
+  "theme_color": "#f4f3ed",
+  "categories": ["games", "education", "simulation"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
