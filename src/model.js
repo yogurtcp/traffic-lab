@@ -5,6 +5,7 @@ export const STEP = 0.05;
 export const CAR_LENGTH = 4.5;
 export const LANE_WIDTH = 3.7;
 const LANE_CHANGE_TIME = 1.6;
+const LANE_CHANGE_COOLDOWN = 5;
 export const PERSONALITIES = {
   regular: {
     name: "Regular",
@@ -14,7 +15,7 @@ export const PERSONALITIES = {
     accel: 1.5,
     brake: 2.5,
     description:
-      "90 km/h. Passes slower or persistently held-up traffic on the left. Checks follower braking before merging, makes room gently at blocked lanes, and keeps right when clear.",
+      "90 km/h. Keeps right whenever it can cruise. Passes slower traffic on the left without forcing sudden follower braking, and makes room gently at blocked lanes.",
   },
   slowpoke: {
     name: "Slowpoke",
@@ -442,6 +443,7 @@ export class Simulation {
         lane: c.lane,
         target: c.target,
         v: c.v,
+        a: c.a,
         paceV: c.paceV,
         paceAge: c.paceAge,
         type: c.type,
@@ -638,7 +640,7 @@ export class Simulation {
     if (state !== this) this.queueCache.set(state, queues);
     return queues;
   }
-  followingAcceleration(car, front, gap) {
+  followingEnvelope(car, front) {
     const p = PERSONALITIES[car.type];
     const closing = car.v - (front?.v ?? car.v);
     const desiredGap =
@@ -647,11 +649,22 @@ export class Simulation {
         0,
         car.v * p.gap + (car.v * closing) / (2 * Math.sqrt(p.accel * p.brake)),
       );
+    const near = Math.max(2 * (2 + car.v * p.gap), desiredGap);
+    return { desiredGap, near, far: near + Math.max(4, closing * 1.5) };
+  }
+  followingAcceleration(car, front, gap) {
+    const p = PERSONALITIES[car.type];
+    const { desiredGap, near, far } = this.followingEnvelope(car, front);
+    // Distant traffic should not slow a car that still has cruising room.
+    // Blend into ordinary following before the comfortable headway is used up.
+    const weight = clamp((far - gap) / (far - near), 0, 1);
+    // Visible braking remains actionable after the driver's perception delay.
+    const influence = front?.a < -0.25 ? 1 : weight * weight * (3 - 2 * weight);
     return clamp(
       p.accel *
         (1 -
           (car.v / this.desiredSpeed(car)) ** 4 -
-          (desiredGap / Math.max(0.2, gap)) ** 2),
+          influence * (desiredGap / Math.max(0.2, gap)) ** 2),
       -8,
       p.accel,
     );
@@ -889,6 +902,7 @@ export class Simulation {
     const initial = {
       q: 0,
       v: car.v,
+      a: car.a ?? 0,
       rearQ: rear ? -(backGap + CAR_LENGTH) / destinationLength : -Infinity,
       rearV: rear?.v ?? 0,
       sourceQ: source.front
@@ -897,11 +911,13 @@ export class Simulation {
           sourceLength
         : Infinity,
       sourceV: source.front?.v ?? 0,
+      sourceA: source.front?.a ?? 0,
       frontQ: front
         ? (gap + (CAR_LENGTH + (front.length ?? CAR_LENGTH)) / 2) /
           destinationLength
         : Infinity,
       frontV: front?.v ?? 0,
+      frontA: front?.a ?? 0,
     };
     const observations = [initial];
     const delay = Math.round(this.config.reaction / STEP);
@@ -926,7 +942,7 @@ export class Simulation {
         3.6
       : 0;
     const leaderMove = (leader, speed) => {
-      if (!leader || leader.obstacle) return { speed: 0, distance: 0 };
+      if (!leader || leader.obstacle) return { speed: 0, distance: 0, a: 0 };
       const actor = { ...leader, v: speed };
       const a = leader.broken
         ? -6
@@ -935,7 +951,7 @@ export class Simulation {
             forecast.followingAcceleration(actor, null, Infinity),
           );
       const next = Math.max(0, speed + a * STEP);
-      return { speed: next, distance: ((speed + next) * STEP) / 2 };
+      return { speed: next, distance: ((speed + next) * STEP) / 2, a };
     };
     for (let i = 0; i < horizon; i++) {
       const time = i * STEP;
@@ -945,7 +961,7 @@ export class Simulation {
       const own = { ...car, v: seen.v };
       let ownA = forecast.followingAcceleration(
         own,
-        front ? { v: seen.frontV } : null,
+        front ? { v: seen.frontV, a: seen.frontA } : null,
         (seen.frontQ - seen.q) * destinationLength -
           (CAR_LENGTH + (front?.length ?? CAR_LENGTH)) / 2,
       );
@@ -955,7 +971,7 @@ export class Simulation {
           ownA,
           forecast.followingAcceleration(
             own,
-            source.front ? { v: seen.sourceV } : null,
+            source.front ? { v: seen.sourceV, a: seen.sourceA } : null,
             (seen.sourceQ - seen.q) * sourceLength -
               (CAR_LENGTH + (source.front?.length ?? CAR_LENGTH)) / 2,
           ),
@@ -966,7 +982,7 @@ export class Simulation {
           ? rearBeforeNoticing
           : forecast.followingAcceleration(
               { ...rear, v: seen.rearV },
-              { v: seen.v },
+              { v: seen.v, a: seen.a },
               (seen.q - seen.rearQ) * destinationLength - CAR_LENGTH,
             );
       if (
@@ -996,14 +1012,17 @@ export class Simulation {
       const next = {
         q: now.q + ((now.v + nextV) * STEP) / (2 * length),
         v: nextV,
+        a: ownA,
         rearQ:
           now.rearQ +
           ((now.rearV + nextRearV) * STEP) / (2 * destinationLength),
         rearV: nextRearV,
         sourceQ: now.sourceQ + sourceMove.distance / sourceLength,
         sourceV: sourceMove.speed,
+        sourceA: sourceMove.a,
         frontQ: now.frontQ + frontMove.distance / destinationLength,
         frontV: frontMove.speed,
+        frontA: frontMove.a,
       };
       const frontLimit =
         next.frontQ -
@@ -1062,6 +1081,44 @@ export class Simulation {
         this.acceleration(car, car.lane, this) + 0.15
     );
   }
+  canCruise(car, lane, state, settle = 0) {
+    const speed = this.desiredSpeed(car);
+    const horizon = this.config.reaction + LANE_CHANGE_TIME + settle;
+    const { front, gap } = this.neighbors(car, lane, state);
+    const closing = Math.max(0, speed - (front?.v ?? speed));
+    const deceleration = Math.min(0, front?.a ?? 0);
+    const brakingTime =
+      deceleration < 0 ? Math.min(horizon, -front.v / deceleration) : 0;
+    const brakingLoss = -deceleration * brakingTime * (horizon - brakingTime / 2);
+    if (
+      front &&
+      gap - closing * horizon - brakingLoss <
+        this.followingEnvelope({ ...car, v: speed }, front).far
+    )
+      return false;
+    // Keeping right must not turn into passing moving traffic on its right.
+    const queues = this.obstructionQueues(state);
+    for (let leftLane = 0; leftLane < lane; leftLane++) {
+      const left = this.neighbors(car, leftLane, state);
+      if (
+        !left.front ||
+        left.front.obstacle ||
+        left.front.broken ||
+        queues[leftLane].has(left.front.id) ||
+        this.junction.inApproachQueue(left.front, this)
+      )
+        continue;
+      const scale = this.laneLength(lane) / this.laneLength(leftLane);
+      const leftGap = (left.gap + CAR_LENGTH) * scale - CAR_LENGTH;
+      const relative = Math.max(0, speed - left.front.v * scale);
+      if (
+        relative > 0 &&
+        leftGap - relative * horizon < Math.max(14, speed * 1.8)
+      )
+        return false;
+    }
+    return true;
+  }
   considerLane(car, delayed) {
     if (
       car.target !== null ||
@@ -1077,11 +1134,6 @@ export class Simulation {
     const desiredSpeed = this.desiredSpeed(car);
     const passMargin = 2 / 3.6;
     const lookAhead = Math.max(55, old.v * 3.5);
-    const passingRange = Math.max(80, desiredSpeed * 6);
-    const slowAhead =
-      front &&
-      gap < passingRange &&
-      this.canOvertake(car, front, false);
     const obstruction =
       front &&
       (front.obstacle ||
@@ -1090,8 +1142,10 @@ export class Simulation {
     // Pass when traffic holds us below our attainable pace, at any speed.
     const blocked =
       front &&
-      gap < lookAhead &&
-      (obstruction || this.canOvertake(car, front));
+      (obstruction
+        ? gap < lookAhead
+        : !this.canCruise(old, car.lane, delayed) &&
+          this.canOvertake(car, front));
     let choices = [];
     if (car.type === "hog") {
       if (car.lane > 0) choices = [car.lane - 1];
@@ -1137,13 +1191,24 @@ export class Simulation {
         for (let lane = 1; lane < car.lane; lane++) {
           const left = this.neighbors(old, lane, delayed);
           const vehicle = left.front;
+          const scale = this.laneLength(car.lane) / this.laneLength(lane);
+          const closing = Math.max(
+            0,
+            desiredSpeed - (vehicle?.v ?? desiredSpeed) * scale,
+          );
+          const preparation =
+            this.config.reaction + LANE_CHANGE_TIME +
+            LANE_CHANGE_COOLDOWN * (car.lane - lane - 1);
           if (
             vehicle &&
             !vehicle.obstacle &&
             !vehicle.broken &&
             !queues[lane].has(vehicle.id) &&
             !this.junction.inApproachQueue(vehicle, this) &&
-            left.gap < passingRange &&
+            closing > 0 &&
+            (left.gap + CAR_LENGTH) * scale - CAR_LENGTH -
+              closing * preparation <
+              Math.max(14, desiredSpeed * 1.8) &&
             this.canOvertake(car, vehicle)
           ) {
             heldByLeft = true;
@@ -1157,7 +1222,7 @@ export class Simulation {
         // A safe gap can still lead straight into slower traffic. Only make
         // a discretionary pass if the destination lane offers a useful pace.
         const leftPace =
-          left.front && left.gap < passingRange
+          left.front && !this.canCruise(old, car.lane - 1, delayed)
             ? Math.min(desiredSpeed, left.front.v)
             : desiredSpeed;
         if (obstruction || leftPace > front.v + passMargin)
@@ -1166,34 +1231,26 @@ export class Simulation {
       // Moving right to escape a stationary obstacle is permitted. Passing
       // moving traffic on the right is not; acceleration also enforces that.
       if (obstruction && blocked) choices.push(car.lane + 1);
-      if (
-        !blocked &&
-        !slowAhead &&
-        !heldByLeft &&
-        car.lane < this.config.lanes - 1
-      ) {
+      if (car.lane < this.config.lanes - 1) {
         const right = this.neighbors(old, car.lane + 1, delayed);
         const clearRoad =
           car.type === "regular"
             ? Math.max(16, car.v * 1.1)
             : Math.max(65, car.v * 4);
-        // Stay in the passing lane while the slower vehicle is still ahead
-        // on our right. Moving back behind it just restarts the same pass.
-        const rightPace =
-          right.front && right.gap < passingRange
-            ? right.front.v
-            : desiredSpeed;
         const giveUpPass =
+          !blocked &&
+          !heldByLeft &&
           right.front &&
           !right.front.obstacle &&
           !right.front.broken &&
           !this.obstructionQueues(delayed)[car.lane + 1].has(right.front.id) &&
           !this.canOvertake(car, right.front, false);
         if (
-          right.gap > clearRoad &&
-          (giveUpPass || rightPace + passMargin >= desiredSpeed)
+          this.canCruise(old, car.lane + 1, delayed, LANE_CHANGE_COOLDOWN) ||
+          (right.gap > clearRoad && giveUpPass)
         )
-          choices.push(car.lane + 1);
+          // Cruising on the right takes priority over a distant future pass.
+          choices.unshift(car.lane + 1);
       }
     }
     for (const lane of choices) {
@@ -1201,7 +1258,7 @@ export class Simulation {
         car.from = car.lane;
         car.target = lane;
         car.blend = 0;
-        car.cooldown = car.type === "stuntman" ? 1.8 : 5;
+        car.cooldown = car.type === "stuntman" ? 1.8 : LANE_CHANGE_COOLDOWN;
         this.changes++;
         break;
       }

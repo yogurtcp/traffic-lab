@@ -413,19 +413,21 @@ test("regular left merges still allow for a faster follower closing during react
   const { sim, car } = leftMergeScenario(110, 90, 2, 80);
   assert.equal(sim.safeLane(car, 0), false);
 });
-test("regulars wait for a tight gap and merge into 50 metres with gentle follower braking", () => {
-  const tight = leftMergeScenario(90, 38, 0.9, 80);
+test("regulars wait for a tight gap and merge into useful gaps with gentle follower braking", () => {
+  const tight = leftMergeScenario(90, 35, 0.9, 80);
   assert.equal(tight.sim.safeLane(tight.car, 0), false);
-  const { sim, car, rear } = leftMergeScenario(90, 50, 0.9, 80);
-  sim.considerLane(car, sim.snapshot());
-  assert.equal(car.target, 0);
-  let hardest = 0;
-  for (let i = 0; i < 80; i++) {
-    sim.step();
-    hardest = Math.min(hardest, rear.a);
-    checkSafe(sim);
+  for (const gap of [38, 50]) {
+    const { sim, car, rear } = leftMergeScenario(90, gap, 0.9, 80);
+    sim.considerLane(car, sim.snapshot());
+    assert.equal(car.target, 0);
+    let hardest = 0;
+    for (let i = 0; i < 80; i++) {
+      sim.step();
+      hardest = Math.min(hardest, rear.a);
+      checkSafe(sim);
+    }
+    assert.ok(hardest >= -1.5, `following driver braked at ${hardest} m/s²`);
   }
-  assert.ok(hardest >= -1.5, `following driver braked at ${hardest} m/s²`);
 });
 test("regulars return right into everyday gaps and still reject a close fast follower", () => {
   for (const [rearSpeed, rearGap, accepted] of [

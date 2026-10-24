@@ -94,7 +94,7 @@ test("accepted returns keep both the merging car and its follower braking gently
           layout,
           rear,
           reaction,
-          gap: 80,
+          gap: 100,
         });
         s.considerLane(car, s.snapshot());
         assert.equal(car.target, 1);
@@ -109,6 +109,12 @@ test("accepted returns keep both the merging car and its follower braking gently
               assert.ok(s.neighbors(c, lane).gap >= 0.49);
         }
       }
+});
+test("a longer reaction delay rejects a return that would leave too little room once cruising ends", () => {
+  const { s, car } = scenario({ gap: 80, reaction: 2, rear: false });
+  assert.equal(s.safeLane(car, 1), false);
+  s.considerLane(car, s.snapshot());
+  assert.equal(car.target, null);
 });
 test("a predicted collision with the destination leader is rejected even during an obstacle escape", () => {
   const { s, car, front } = scenario({ gap: 38, leaderSpeed: 0, rear: false });
